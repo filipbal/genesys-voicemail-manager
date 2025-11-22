@@ -1,0 +1,315 @@
+{% extends "base.html" %}
+
+{% block title %}Documentation{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-10">
+        
+        <!-- Back Button -->
+        <div class="mb-4">
+            <a href="{{ url_for('index') }}" class="btn btn-outline-secondary">
+                <i class="bi bi-arrow-left me-2"></i>
+                Back to Home
+            </a>
+        </div>
+
+        <!-- Documentation Header -->
+        <div class="text-center mb-5">
+            <h1>
+                <i class="bi bi-book text-primary me-2"></i>
+                Documentation
+            </h1>
+            <p class="text-muted">Genesys Voicemail Manager - User Guide</p>
+        </div>
+
+        <!-- Overview -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h4 class="mb-0"><i class="bi bi-info-circle me-2"></i>Overview</h4>
+            </div>
+            <div class="card-body">
+                <p>Genesys Cloud enforces user-level ownership on voicemail media—administrators cannot access other users' voicemail recordings. This application provides a self-service portal where users can manage their own voicemails through a web browser.</p>
+            </div>
+        </div>
+
+        <!-- Features -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h4 class="mb-0"><i class="bi bi-stars me-2"></i>Features</h4>
+            </div>
+            <div class="card-body">
+                <h5>Authentication</h5>
+                <ul>
+                    <li><strong>OAuth 2.0 with PKCE</strong> - Secure browser-based authentication</li>
+                    <li><strong>Session-based tokens</strong> - Access tokens stored securely in server-side sessions</li>
+                </ul>
+
+                <h5 class="mt-4">Voicemail Management</h5>
+                <ul>
+                    <li><strong>View voicemails</strong> - List all voicemails with caller info, date, duration, and read status</li>
+                    <li><strong>Download individual</strong> - Download single voicemail as WAV file</li>
+                    <li><strong>Download all</strong> - Export all voicemails as ZIP archive with metadata</li>
+                    <li><strong>Delete individual</strong> - Remove single voicemail with confirmation</li>
+                    <li><strong>Delete all</strong> - Bulk delete all voicemails with confirmation</li>
+                    <li><strong>Forward to user</strong> - Forward voicemail to another Genesys user</li>
+                </ul>
+
+                <h5 class="mt-4">User Interface</h5>
+                <ul>
+                    <li><strong>Responsive design</strong> - Works on desktop and mobile devices</li>
+                    <li><strong>Dark/Light mode</strong> - Theme toggle for user preference</li>
+                    <li><strong>Real-time feedback</strong> - Toast notifications for all actions</li>
+                    <li><strong>Bulk selection</strong> - Checkbox selection for batch operations</li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- How to Use -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h4 class="mb-0"><i class="bi bi-play-circle me-2"></i>How to Use</h4>
+            </div>
+            <div class="card-body">
+                <div class="accordion" id="howToAccordion">
+                    
+                    <!-- Login -->
+                    <div class="accordion-item">
+                        <h2 class="accordion-header">
+                            <button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#collapseLogin">
+                                <i class="bi bi-box-arrow-in-right me-2"></i>
+                                Logging In
+                            </button>
+                        </h2>
+                        <div id="collapseLogin" class="accordion-collapse collapse show" data-bs-parent="#howToAccordion">
+                            <div class="accordion-body">
+                                <ol>
+                                    <li>Click the <strong>"Login with Genesys Cloud"</strong> button on the home page</li>
+                                    <li>You will be redirected to Genesys Cloud login page</li>
+                                    <li>Enter your Genesys credentials</li>
+                                    <li>After successful authentication, you'll be redirected to your voicemail dashboard</li>
+                                </ol>
+                                <div class="alert alert-info small mb-0">
+                                    <i class="bi bi-info-circle me-2"></i>
+                                    Your password is never seen or stored by this application.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Downloading -->
+                    <div class="accordion-item">
+                        <h2 class="accordion-header">
+                            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseDownload">
+                                <i class="bi bi-download me-2"></i>
+                                Downloading Voicemails
+                            </button>
+                        </h2>
+                        <div id="collapseDownload" class="accordion-collapse collapse" data-bs-parent="#howToAccordion">
+                            <div class="accordion-body">
+                                <h6>Individual Download:</h6>
+                                <ol>
+                                    <li>Find the voicemail you want to download</li>
+                                    <li>Click the <strong>download icon</strong> <i class="bi bi-download"></i> next to it</li>
+                                    <li>The WAV file will be downloaded to your computer</li>
+                                </ol>
+                                
+                                <h6 class="mt-3">Download All:</h6>
+                                <ol>
+                                    <li>Click the <strong>"Download All"</strong> button at the top of the dashboard</li>
+                                    <li>A ZIP file containing all voicemails and metadata will be downloaded</li>
+                                </ol>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Forwarding -->
+                    <div class="accordion-item">
+                        <h2 class="accordion-header">
+                            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseForward">
+                                <i class="bi bi-forward me-2"></i>
+                                Forwarding Voicemails
+                            </button>
+                        </h2>
+                        <div id="collapseForward" class="accordion-collapse collapse" data-bs-parent="#howToAccordion">
+                            <div class="accordion-body">
+                                <ol>
+                                    <li>Click the <strong>forward icon</strong> <i class="bi bi-forward"></i> next to the voicemail</li>
+                                    <li>A modal will appear with a search box</li>
+                                    <li>Type the name or email of the recipient user</li>
+                                    <li>Select the user from the search results</li>
+                                    <li>Click <strong>"Forward"</strong> to send</li>
+                                </ol>
+                                <div class="alert alert-warning small mb-0">
+                                    <i class="bi bi-exclamation-triangle me-2"></i>
+                                    Forwarded voicemails will appear in the recipient's Genesys voicemail inbox.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Deleting -->
+                    <div class="accordion-item">
+                        <h2 class="accordion-header">
+                            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseDelete">
+                                <i class="bi bi-trash me-2"></i>
+                                Deleting Voicemails
+                            </button>
+                        </h2>
+                        <div id="collapseDelete" class="accordion-collapse collapse" data-bs-parent="#howToAccordion">
+                            <div class="accordion-body">
+                                <h6>Individual Delete:</h6>
+                                <ol>
+                                    <li>Click the <strong>delete icon</strong> <i class="bi bi-trash text-danger"></i> next to the voicemail</li>
+                                    <li>Confirm the deletion in the popup dialog</li>
+                                </ol>
+                                
+                                <h6 class="mt-3">Delete All:</h6>
+                                <ol>
+                                    <li>Click the <strong>"Delete All"</strong> button at the top of the dashboard</li>
+                                    <li>Read the warning carefully</li>
+                                    <li>Confirm to delete all voicemails</li>
+                                </ol>
+                                
+                                <div class="alert alert-danger small mb-0">
+                                    <i class="bi bi-exclamation-octagon me-2"></i>
+                                    <strong>Warning:</strong> Deleted voicemails cannot be recovered!
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+
+        <!-- Security -->
+        <div class="card mb-4 border-warning">
+            <div class="card-header bg-warning bg-opacity-10">
+                <h4 class="mb-0 text-warning"><i class="bi bi-shield-lock me-2"></i>Security</h4>
+            </div>
+            <div class="card-body">
+                <ul class="mb-0">
+                    <li><strong>No password storage</strong> - Authentication handled entirely by Genesys Cloud OAuth</li>
+                    <li><strong>Token security</strong> - Access tokens stored only in server-side sessions</li>
+                    <li><strong>User isolation</strong> - Each user can only access their own voicemails</li>
+                    <li><strong>HTTPS required</strong> - All traffic encrypted</li>
+                    <li><strong>CSRF protection</strong> - OAuth state parameter prevents cross-site request forgery</li>
+                    <li><strong>Temporary files</strong> - Downloaded files cleaned up automatically</li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- Troubleshooting -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h4 class="mb-0"><i class="bi bi-tools me-2"></i>Troubleshooting</h4>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-striped">
+                        <thead>
+                            <tr>
+                                <th>Problem</th>
+                                <th>Solution</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>Login fails or redirects incorrectly</td>
+                                <td>Clear your browser cache and try again. Ensure you're using the correct Genesys account.</td>
+                            </tr>
+                            <tr>
+                                <td>No voicemails showing</td>
+                                <td>Your voicemail inbox may be empty. Check Genesys UI to confirm.</td>
+                            </tr>
+                            <tr>
+                                <td>"Access denied" when downloading</td>
+                                <td>The voicemail may have been deleted. Try refreshing the page.</td>
+                            </tr>
+                            <tr>
+                                <td>Forward not working</td>
+                                <td>Ensure the recipient user exists and has voicemail enabled.</td>
+                            </tr>
+                            <tr>
+                                <td>Session expired</td>
+                                <td>Log out and log back in to get a fresh token.</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- API Reference (for advanced users) -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h4 class="mb-0"><i class="bi bi-code-slash me-2"></i>API Endpoints</h4>
+            </div>
+            <div class="card-body">
+                <p class="text-muted small">For developers and advanced users.</p>
+                <div class="table-responsive">
+                    <table class="table table-sm">
+                        <thead>
+                            <tr>
+                                <th>Endpoint</th>
+                                <th>Method</th>
+                                <th>Description</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><code>/api/voicemails</code></td>
+                                <td><span class="badge bg-success">GET</span></td>
+                                <td>List all voicemails (JSON)</td>
+                            </tr>
+                            <tr>
+                                <td><code>/download/&lt;id&gt;</code></td>
+                                <td><span class="badge bg-success">GET</span></td>
+                                <td>Download single voicemail</td>
+                            </tr>
+                            <tr>
+                                <td><code>/download-all</code></td>
+                                <td><span class="badge bg-success">GET</span></td>
+                                <td>Download all as ZIP</td>
+                            </tr>
+                            <tr>
+                                <td><code>/api/delete/&lt;id&gt;</code></td>
+                                <td><span class="badge bg-danger">DELETE</span></td>
+                                <td>Delete single voicemail</td>
+                            </tr>
+                            <tr>
+                                <td><code>/api/delete-all</code></td>
+                                <td><span class="badge bg-danger">DELETE</span></td>
+                                <td>Delete all voicemails</td>
+                            </tr>
+                            <tr>
+                                <td><code>/api/forward/&lt;id&gt;</code></td>
+                                <td><span class="badge bg-primary">POST</span></td>
+                                <td>Forward voicemail</td>
+                            </tr>
+                            <tr>
+                                <td><code>/api/search/users</code></td>
+                                <td><span class="badge bg-success">GET</span></td>
+                                <td>Search users</td>
+                            </tr>
+                            <tr>
+                                <td><code>/health</code></td>
+                                <td><span class="badge bg-success">GET</span></td>
+                                <td>Health check</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="text-center text-muted mb-4">
+            <hr>
+            <p class="small">Internal Use Only | Developed by Filip Balakovski</p>
+        </div>
+
+    </div>
+</div>
+{% endblock %}

@@ -967,6 +967,10 @@ def health():
         'timestamp': datetime.now().isoformat()
     })
 
+@app.route('/documentation')
+def documentation():
+    """Display documentation page"""
+    return render_template('documentation.html')
 
 # ============================================================================
 # ERROR HANDLERS
