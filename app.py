@@ -1,18 +1,24 @@
 #!/usr/bin/env python3
 """
-Genesys Cloud Voicemail Web Exporter - FIXED VERSION v5
+Genesys Cloud Voicemail Web Exporter - FIXED VERSION v6
 ========================================================
 CRITICAL FIX: Accurate voicemail counting
 
-PROBLEM: The Genesys API's 'total' field is STALE - it updates in batches of 25.
-This causes incorrect counts after deletions (500 VMs -> delete 1 -> still shows 500).
+PROBLEM: 
+1. The Genesys API's 'total' field is STALE - updates in batches of 25
+2. The API returns DELETED voicemails (soft-deleted, retained for 14 days via deleteRetentionPolicy)
+3. This causes incorrect counts: 500 VMs -> delete 1 -> still shows 500
 
-SOLUTION: NEVER trust the API's 'total' field. Instead:
-1. Fetch pages until we get an empty page or partial page
-2. The API already filters deleted voicemails (state != 'deleted')
-3. Count the actual entities returned = TRUE TOTAL
+SOLUTION:
+1. Use /api/v2/voicemail/me/messages endpoint (pageSize max 50)
+2. Fetch all pages using API's pageCount
+3. Filter out deleted voicemails manually (deleted=true, state='DELETED', or deletedDate != null)
+4. Count actual non-deleted entities = TRUE TOTAL
 
-This is the most straightforward approach that ensures accuracy.
+DELETE RETENTION POLICY:
+Genesys keeps deleted voicemails for 14 days (deleteRetentionPolicy.numberOfDays)
+before permanently removing them. During this period, they appear in API results
+with deleted=true, so we must filter them out.
 """
 
 import os
@@ -66,7 +72,7 @@ os.makedirs(TEMP_DIR, exist_ok=True)
 # CONFIGURATION
 # ============================================================================
 
-API_PAGE_SIZE = 100  # Max items per API page
+API_PAGE_SIZE = 50  # Max items per API page (Genesys limit for /me/messages)
 DISPLAY_PAGE_SIZE = 50  # Items per UI page
 
 # Batch processing settings
@@ -205,26 +211,29 @@ def get_all_voicemails(access_token, region_host):
     """
     Get ALL voicemails with ACCURATE count.
     
-    CRITICAL: The Genesys API's 'total' field is STALE - it updates in batches of 25.
+    CRITICAL FIXES:
+    1. Use /api/v2/voicemail/me/messages (not /messages) - more reliable
+    2. API's 'total' field is STALE - updates in batches of 25
+    3. API returns DELETED voicemails (soft-deleted, retained for 14 days)
+    4. Must filter out deleted=true manually
+    5. Use pageCount from API but count ACTUAL non-deleted entities
     
-    The API already filters out deleted voicemails (they're not included in entities).
-    So we just need to:
-    1. Fetch pages until we get an empty page or a page with fewer items than pageSize
-    2. Count the actual entities returned
-    3. This gives us the TRUE total
+    Delete Retention: Voicemails marked as deleted are retained for 14 days
+    (deleteRetentionPolicy.numberOfDays) before being permanently removed.
     
     Returns: (list of all active voicemails sorted by date desc, error)
     """
     all_voicemails = []
     page_number = 1
+    api_page_count = None
     
-    app.logger.info("Fetching all voicemails (counting actual entities, ignoring API's stale 'total' field)...")
+    app.logger.info("Fetching all voicemails from /me/messages endpoint...")
     
     while page_number <= MAX_PAGES:
-        # Fetch page
-        url = f"https://api.{region_host}/api/v2/voicemail/messages"
+        # Use /me/messages endpoint - max pageSize is 50
+        url = f"https://api.{region_host}/api/v2/voicemail/me/messages"
         params = {
-            'pageSize': API_PAGE_SIZE,
+            'pageSize': API_PAGE_SIZE,  # Max 50 for /me/messages
             'pageNumber': page_number
         }
         url_with_params = f"{url}?{urllib.parse.urlencode(params)}"
@@ -234,46 +243,60 @@ def get_all_voicemails(access_token, region_host):
         if error:
             app.logger.error(f"Error fetching page {page_number}: {error}")
             if page_number == 1:
-                # If first page fails, return error
                 return None, error
-            # If later page fails, return what we have
             break
         
         entities = data.get('entities', [])
         
-        # Log API's claim vs reality on first page (for debugging)
+        # Get pageCount from first request
         if page_number == 1:
-            api_total = data.get('total', 0)
             api_page_count = data.get('pageCount', 1)
+            api_total = data.get('total', 0)
             app.logger.info(
-                f"API reports total={api_total}, pageCount={api_page_count} "
-                f"(IGNORING - will count actual entities)"
+                f"API reports: total={api_total}, pageCount={api_page_count} "
+                f"(will filter deleted and count actual)"
             )
         
         # If page is empty, we're done
         if not entities:
-            app.logger.debug(f"Page {page_number} is empty, stopping pagination")
+            app.logger.debug(f"Page {page_number} is empty, stopping")
             break
         
-        # Add this page's entities (API already filtered out deleted ones)
-        all_voicemails.extend(entities)
+        # Filter out DELETED voicemails
+        # A voicemail is deleted if:
+        # - deleted=true, OR
+        # - state='DELETED', OR
+        # - deletedDate is not null
+        page_active = []
+        page_deleted = 0
+        
+        for vm in entities:
+            # Check multiple deletion indicators
+            is_deleted = (
+                vm.get('deleted', False) or
+                vm.get('state', '').upper() == 'DELETED' or
+                vm.get('deletedDate') is not None
+            )
+            
+            if is_deleted:
+                page_deleted += 1
+            else:
+                page_active.append(vm)
+        
+        all_voicemails.extend(page_active)
+        
         app.logger.debug(
-            f"Page {page_number}: fetched {len(entities)} voicemails "
-            f"(running total: {len(all_voicemails)})"
+            f"Page {page_number}/{api_page_count}: "
+            f"{len(entities)} total, {len(page_active)} active, {page_deleted} deleted"
         )
         
-        # Check if we got fewer items than page size - indicates last page
-        if len(entities) < API_PAGE_SIZE:
-            app.logger.debug(
-                f"Partial page received ({len(entities)} < {API_PAGE_SIZE}), "
-                f"this is the last page"
-            )
+        # Stop if we've processed all pages
+        if api_page_count and page_number >= api_page_count:
+            app.logger.debug(f"Reached last page ({api_page_count})")
             break
         
         page_number += 1
-        
-        # Small delay between pages to be nice to API
-        time.sleep(0.05)
+        time.sleep(0.05)  # Small delay between pages
     
     # Sort by date descending (newest first)
     all_voicemails.sort(
@@ -281,12 +304,12 @@ def get_all_voicemails(access_token, region_host):
         reverse=True
     )
     
-    # THE TRUE COUNT - from actual entities we fetched
+    # THE TRUE COUNT - from actual non-deleted entities
     true_count = len(all_voicemails)
     
     app.logger.info(
-        f"✓ ACTUAL COUNT: {true_count} voicemails "
-        f"(fetched from {page_number} pages)"
+        f"✓ ACTUAL COUNT: {true_count} active voicemails "
+        f"(fetched {page_number - 1} pages, filtered out deleted)"
     )
     
     return all_voicemails, None
@@ -1161,7 +1184,7 @@ def health():
     """Health check endpoint"""
     return jsonify({
         'status': 'healthy',
-        'version': 'v5-accurate-count',
+        'version': 'v6-accurate-count-with-deleted-filter',
         'timestamp': datetime.now().isoformat()
     })
 
