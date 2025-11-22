@@ -157,7 +157,7 @@ def get_user_info(access_token, region_host):
 
 
 def get_voicemails(access_token, region_host):
-    """Get all voicemails for the authenticated user"""
+    """Get all voicemails for the authenticated user (excluding deleted)"""
     all_messages = []
     page_number = 1
     page_size = 100
@@ -177,7 +177,17 @@ def get_voicemails(access_token, region_host):
                 if 'entities' not in data or not data['entities']:
                     break
                 
-                all_messages.extend(data['entities'])
+                # FIX: Filter out deleted voicemails
+                # Genesys API may return voicemails with deleted=True or state='deleted'
+                for vm in data['entities']:
+                    # Skip deleted voicemails - check multiple possible indicators
+                    if vm.get('deleted', False):
+                        continue
+                    if vm.get('state', '').lower() == 'deleted':
+                        continue
+                    if vm.get('deletedDate') is not None:
+                        continue
+                    all_messages.append(vm)
                 
                 if page_number >= data.get('pageCount', 1):
                     break
