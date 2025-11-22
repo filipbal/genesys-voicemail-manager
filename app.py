@@ -367,6 +367,53 @@ def forward_all_voicemails(access_token, region_host, voicemail_ids, target_id, 
     return results
 
 
+def delete_voicemail(access_token, region_host, voicemail_id):
+    """
+    Delete a single voicemail message.
+    
+    DELETE /api/v2/voicemail/messages/{messageId}
+    """
+    url = f"https://api.{region_host}/api/v2/voicemail/messages/{voicemail_id}"
+    
+    req = urllib.request.Request(url, method='DELETE')
+    req.add_header('Authorization', f'Bearer {access_token}')
+    
+    try:
+        with urllib.request.urlopen(req, timeout=60) as response:
+            return True, "Deleted successfully"
+    except urllib.request.HTTPError as e:
+        try:
+            error_body = json.loads(e.read().decode())
+            error_msg = error_body.get('message', str(error_body))
+        except:
+            error_msg = f"HTTP {e.code}: {e.reason}"
+        return False, error_msg
+    except Exception as e:
+        return False, str(e)
+
+
+def delete_all_voicemails(access_token, region_host, voicemail_ids):
+    """Delete multiple voicemails"""
+    results = {
+        'success': 0,
+        'failed': 0,
+        'errors': []
+    }
+    
+    for vm_id in voicemail_ids:
+        success, result = delete_voicemail(access_token, region_host, vm_id)
+        if success:
+            results['success'] += 1
+        else:
+            results['failed'] += 1
+            results['errors'].append(f"VM {vm_id[:8]}...: {result}")
+        
+        # Small delay to avoid rate limiting
+        time.sleep(0.2)
+    
+    return results
+
+
 # ============================================================================
 # HELPER FUNCTIONS
 # ============================================================================
@@ -811,6 +858,82 @@ def forward_single(message_id):
         flash(f'Failed to forward voicemail: {result}', 'danger')
     
     return redirect(url_for('dashboard'))
+
+
+# ============================================================================
+# DELETE ROUTES
+# ============================================================================
+
+@app.route('/api/delete', methods=['POST'])
+@login_required
+def api_delete_voicemails():
+    """API endpoint to delete voicemails"""
+    access_token = session.get('access_token')
+    region_host = session.get('region_host')
+    
+    data = request.get_json()
+    if not data:
+        return jsonify({'success': False, 'error': 'No data provided'}), 400
+    
+    voicemail_ids = data.get('voicemail_ids', [])
+    
+    if not voicemail_ids:
+        return jsonify({'success': False, 'error': 'No voicemails selected'}), 400
+    
+    results = delete_all_voicemails(access_token, region_host, voicemail_ids)
+    
+    return jsonify({
+        'success': results['failed'] == 0,
+        'deleted': results['success'],
+        'failed': results['failed'],
+        'errors': results['errors']
+    })
+
+
+@app.route('/delete/single/<message_id>', methods=['POST'])
+@login_required
+def delete_single(message_id):
+    """Delete a single voicemail"""
+    access_token = session.get('access_token')
+    region_host = session.get('region_host')
+    
+    success, result = delete_voicemail(access_token, region_host, message_id)
+    
+    if success:
+        flash('Voicemail deleted successfully!', 'success')
+    else:
+        flash(f'Failed to delete voicemail: {result}', 'danger')
+    
+    return redirect(url_for('dashboard'))
+
+
+@app.route('/delete')
+@login_required
+def delete_page():
+    """Page to bulk delete voicemails"""
+    access_token = session.get('access_token')
+    region_host = session.get('region_host')
+    region_key = session.get('region_key')
+    user_info = session.get('user_info', {})
+    
+    voicemails = get_voicemails(access_token, region_host)
+    
+    processed_voicemails = []
+    for vm in voicemails:
+        processed_voicemails.append({
+            'id': vm.get('id'),
+            'caller_name': vm.get('callerName', 'Unknown'),
+            'caller_address': vm.get('callerAddress', ''),
+            'created_date': format_datetime(vm.get('createdDate')),
+            'duration': format_duration(vm.get('audioRecordingDurationSeconds')),
+            'read': vm.get('read', False),
+        })
+    
+    return render_template('delete.html',
+                         user_info=user_info,
+                         region=REGIONS.get(region_key, {}),
+                         voicemails=processed_voicemails,
+                         voicemail_count=len(processed_voicemails))
 
 
 # ============================================================================

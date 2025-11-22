@@ -160,6 +160,14 @@
                                         title="Forward">
                                     <i class="bi bi-forward"></i>
                                 </button>
+                                <button type="button" class="btn btn-outline-danger"
+                                        data-bs-toggle="modal" 
+                                        data-bs-target="#deleteModal"
+                                        data-vm-id="{{ vm.id }}"
+                                        data-vm-caller="{{ vm.caller_name }}"
+                                        title="Delete">
+                                    <i class="bi bi-trash"></i>
+                                </button>
                             </div>
                         </td>
                     </tr>
@@ -187,22 +195,28 @@
     </div>
     <div class="card-body">
         <div class="row">
-            <div class="col-md-4">
+            <div class="col-md-3">
                 <h6><i class="bi bi-download me-2 text-primary"></i>Download</h6>
                 <p class="small text-muted mb-3">
-                    Download voicemails as WAV audio files. Use "Download All" to get a ZIP with all voicemails.
+                    Download voicemails as WAV audio files.
                 </p>
             </div>
-            <div class="col-md-4">
+            <div class="col-md-3">
                 <h6><i class="bi bi-forward me-2 text-primary"></i>Forward</h6>
                 <p class="small text-muted mb-3">
-                    Forward voicemails to another user or group. Use "Forward All" for bulk forwarding.
+                    Forward voicemails to another user.
                 </p>
             </div>
-            <div class="col-md-4">
+            <div class="col-md-3">
+                <h6><i class="bi bi-trash me-2 text-danger"></i>Delete</h6>
+                <p class="small text-muted mb-3">
+                    Permanently delete voicemails.
+                </p>
+            </div>
+            <div class="col-md-3">
                 <h6><i class="bi bi-info-circle me-2 text-primary"></i>Note</h6>
                 <p class="small text-muted mb-3">
-                    You can only access voicemails that belong to your account.
+                    You can only access your own voicemails.
                 </p>
             </div>
         </div>
@@ -263,6 +277,41 @@
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
                 <button type="button" class="btn btn-genesys" id="modalForwardBtn" onclick="forwardSingle()" disabled>
                     <i class="bi bi-forward me-1"></i> Forward
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Delete Single Modal -->
+<div class="modal fade" id="deleteModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title">
+                    <i class="bi bi-exclamation-triangle me-2"></i>
+                    Delete Voicemail
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="text-center mb-3">
+                    <i class="bi bi-trash text-danger" style="font-size: 3rem;"></i>
+                </div>
+                <p class="text-center">
+                    Are you sure you want to delete the voicemail from:<br>
+                    <strong id="deleteCallerName"></strong>?
+                </p>
+                <div class="alert alert-warning">
+                    <i class="bi bi-exclamation-triangle me-2"></i>
+                    <strong>Warning:</strong> This action cannot be undone!
+                </div>
+                <input type="hidden" id="deleteVoicemailId">
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-danger" id="confirmDeleteBtn" onclick="deleteSingle()">
+                    <i class="bi bi-trash me-1"></i> Delete
                 </button>
             </div>
         </div>
@@ -448,6 +497,54 @@ function showToast(type, message) {
     toast.show();
     
     toastEl.addEventListener('hidden.bs.toast', () => toastEl.remove());
+}
+
+// Delete Modal Logic
+document.getElementById('deleteModal').addEventListener('show.bs.modal', function(event) {
+    const button = event.relatedTarget;
+    const vmId = button.getAttribute('data-vm-id');
+    const vmCaller = button.getAttribute('data-vm-caller');
+    
+    document.getElementById('deleteVoicemailId').value = vmId;
+    document.getElementById('deleteCallerName').textContent = vmCaller;
+});
+
+function deleteSingle() {
+    const vmId = document.getElementById('deleteVoicemailId').value;
+    const btn = document.getElementById('confirmDeleteBtn');
+    
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Deleting...';
+    
+    fetch('/api/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            voicemail_ids: [vmId]
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        // Close modal
+        bootstrap.Modal.getInstance(document.getElementById('deleteModal')).hide();
+        
+        if (data.success) {
+            showToast('success', 'Voicemail deleted successfully!');
+            // Reload page to refresh list
+            setTimeout(() => location.reload(), 1000);
+        } else {
+            showToast('danger', `Failed to delete: ${data.errors.join(', ')}`);
+        }
+        
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-trash me-1"></i> Delete';
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-trash me-1"></i> Delete';
+        showToast('danger', 'An error occurred');
+    });
 }
 </script>
 {% endblock %}
