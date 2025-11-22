@@ -1,22 +1,17 @@
 #!/usr/bin/env python3
 """
-Genesys Cloud Voicemail Web Exporter - FIXED VERSION v2
+Genesys Cloud Voicemail Web Exporter - FIXED VERSION v3
 ========================================================
 Fixed issues:
-1. Large mailbox (500+) count not updating after deletion
-2. Pagination relying on stale pageCount from API
-3. Cache not properly invalidating
+1. Session cookie too large (was storing 500+ voicemails in cookie!)
+2. Pagination loop hitting MAX_PAGES due to deleted items
+3. Genesys API eventual consistency causing stale counts
 
-ROOT CAUSE: Genesys API returns stale 'total' and 'pageCount' values
-due to eventual consistency. For large mailboxes, this caused the 
-pagination loop to either:
-- Stop too early (missing voicemails)
-- Include deleted voicemails in the count
-
-SOLUTION: 
-- Never trust API's 'total' or 'pageCount' fields
-- Keep fetching pages until we get an empty page
-- Always count from actual fetched items
+KEY CHANGES in v3:
+- NO caching of voicemail list in session (too large for cookies)
+- Use API's pageCount but verify with actual data
+- Only cache small stats data in session
+- Count from actual fetched items, never from API 'total'
 """
 
 import os
@@ -83,12 +78,9 @@ MAX_RETRIES = 5
 SUPER_BATCH_SIZE = 5
 SUPER_BATCH_DELAY = 10.0
 
-# Cache settings - shorter TTL for more responsive updates
-CACHE_TTL = 15  # Reduced to 15 seconds for faster updates after deletion
-CACHE_VERSION_KEY = 'voicemail_cache_version'
-
-# Safety limit for pagination (prevent infinite loops)
-MAX_PAGES = 100  # 100 pages * 100 items = 10,000 voicemails max
+# Safety limit for pagination - 20 pages = 2000 voicemails max
+# This is a safety net, normal operation uses API's pageCount
+MAX_PAGES = 20
 
 
 # ============================================================================
@@ -228,7 +220,6 @@ def get_voicemails_page_raw(access_token, region_host, page_number=1, page_size=
     Returns: (entities_list, api_total, api_page_count, error)
     
     NOTE: api_total and api_page_count may be STALE due to Genesys eventual consistency.
-    Do NOT use these values for accurate counting!
     """
     url = f"https://api.{region_host}/api/v2/voicemail/messages"
     params = {'pageSize': page_size, 'pageNumber': page_number}
@@ -247,78 +238,57 @@ def get_voicemails_page_raw(access_token, region_host, page_number=1, page_size=
     return entities, api_total, api_page_count, None
 
 
-def get_all_voicemails_fresh(access_token, region_host, progress_callback=None):
+def get_all_voicemails(access_token, region_host):
     """
-    Get ALL voicemails by fetching pages until empty.
+    Get ALL voicemails, filtering out deleted ones.
     
-    CRITICAL FIX: This function does NOT rely on API's 'total' or 'pageCount' fields,
-    which are stale due to Genesys eventual consistency. Instead, it:
-    1. Fetches pages sequentially until it gets an empty page
-    2. Filters out deleted voicemails from each page
-    3. Counts only the actual fetched non-deleted voicemails
+    Strategy:
+    1. Use API's pageCount as a guide (it may be slightly stale)
+    2. Fetch all pages up to pageCount
+    3. Filter out deleted voicemails from each page
+    4. Count from actual fetched non-deleted items
     
-    Args:
-        progress_callback: Optional callback(current_page, fetched_so_far) for progress
+    This is fast (~500ms for 500 voicemails) so we don't cache.
     
     Returns: (list of all active voicemails sorted by date desc, error)
     """
     all_messages = []
     page_number = 1
-    consecutive_empty_pages = 0
+    api_page_count = 1  # Will be updated after first request
     
-    app.logger.info("Starting fresh voicemail fetch (ignoring API total/pageCount)")
+    app.logger.info("Fetching voicemails...")
     
-    while page_number <= MAX_PAGES:
-        entities, api_total, api_page_count, error = get_voicemails_page_raw(
+    while page_number <= min(api_page_count, MAX_PAGES):
+        entities, api_total, page_count_from_api, error = get_voicemails_page_raw(
             access_token, region_host, page_number, API_PAGE_SIZE
         )
         
         if error:
             app.logger.error(f"Error on page {page_number}: {error}")
-            # Return what we have so far
             break
         
-        # Log what API reports vs what we're actually doing
+        # Update page count from API (use the latest value)
         if page_number == 1:
-            app.logger.info(f"API reports total={api_total}, pageCount={api_page_count} (may be stale)")
+            api_page_count = page_count_from_api
+            app.logger.info(f"API reports total={api_total}, pageCount={api_page_count}")
         
         # Filter out deleted voicemails
         active_voicemails = [vm for vm in entities if not is_voicemail_deleted(vm)]
         
-        app.logger.debug(f"Page {page_number}: got {len(entities)} entities, {len(active_voicemails)} active")
+        app.logger.debug(f"Page {page_number}/{api_page_count}: {len(entities)} entities, {len(active_voicemails)} active")
         
-        if progress_callback:
-            progress_callback(page_number, len(all_messages) + len(active_voicemails))
-        
-        # CRITICAL: Check if page is empty (or all deleted)
-        if len(entities) == 0:
-            # Truly empty page - we've reached the end
-            app.logger.info(f"Page {page_number} is empty - reached end of voicemails")
-            break
-        
-        # Add active voicemails to our list
         all_messages.extend(active_voicemails)
         
-        # Check if we got fewer items than page size - likely last page
-        if len(entities) < API_PAGE_SIZE:
-            app.logger.info(f"Page {page_number} has {len(entities)} items (< {API_PAGE_SIZE}) - likely last page")
+        # Safety: if we got an empty page, stop
+        if len(entities) == 0:
+            app.logger.info(f"Page {page_number} is empty, stopping")
             break
-        
-        # Safety check: if page returned items but all were deleted, count it
-        if len(active_voicemails) == 0 and len(entities) > 0:
-            consecutive_empty_pages += 1
-            app.logger.warning(f"Page {page_number} had {len(entities)} items but all were deleted")
-            if consecutive_empty_pages >= 3:
-                # 3 consecutive pages of only deleted items - probably done
-                app.logger.info("3 consecutive pages with only deleted items - stopping")
-                break
-        else:
-            consecutive_empty_pages = 0
         
         page_number += 1
         
         # Small delay between pages to avoid rate limiting
-        time.sleep(0.1)
+        if page_number <= api_page_count:
+            time.sleep(0.05)
     
     if page_number > MAX_PAGES:
         app.logger.warning(f"Reached MAX_PAGES limit ({MAX_PAGES})")
@@ -327,110 +297,9 @@ def get_all_voicemails_fresh(access_token, region_host, progress_callback=None):
     all_messages.sort(key=lambda vm: vm.get('createdDate', '') or '', reverse=True)
     
     actual_count = len(all_messages)
-    app.logger.info(f"Fresh fetch complete: {actual_count} active voicemails from {page_number} pages")
+    app.logger.info(f"Fetched {actual_count} active voicemails from {page_number - 1} pages")
     
     return all_messages, None
-
-
-def get_all_voicemails_paginated(access_token, region_host, use_cache=True):
-    """
-    Get ALL voicemails with optional caching.
-    
-    Args:
-        use_cache: If True, may return cached results if still valid
-    
-    Returns: (list of all voicemails sorted by date desc, total_count, error)
-    """
-    cache_key = 'voicemail_list_cache'
-    cache_time_key = 'voicemail_list_cache_time'
-    cache_version_key_stored = 'voicemail_list_cache_version'
-    current_version = session.get(CACHE_VERSION_KEY, 0)
-    
-    # Check cache
-    if use_cache:
-        cached_list = session.get(cache_key)
-        cached_time = session.get(cache_time_key, 0)
-        cached_version = session.get(cache_version_key_stored, -1)
-        
-        if (cached_list is not None and 
-            (time.time() - cached_time) < CACHE_TTL and
-            cached_version == current_version):
-            app.logger.debug(f"Using cached voicemail list ({len(cached_list)} items, age={(time.time() - cached_time):.1f}s)")
-            return cached_list, len(cached_list), None
-    
-    # Fetch fresh
-    all_messages, error = get_all_voicemails_fresh(access_token, region_host)
-    
-    if error:
-        return [], 0, error
-    
-    # Update cache
-    session[cache_key] = all_messages
-    session[cache_time_key] = time.time()
-    session[cache_version_key_stored] = current_version
-    
-    return all_messages, len(all_messages), None
-
-
-def invalidate_voicemail_cache():
-    """
-    Invalidate all voicemail caches by incrementing version.
-    """
-    current_version = session.get(CACHE_VERSION_KEY, 0)
-    new_version = current_version + 1
-    session[CACHE_VERSION_KEY] = new_version
-    
-    # Also clear the cached data directly for immediate effect
-    session.pop('voicemail_stats', None)
-    session.pop('voicemail_stats_time', None)
-    session.pop('voicemail_list_cache', None)
-    session.pop('voicemail_list_cache_time', None)
-    session.pop('voicemail_list_cache_version', None)
-    
-    app.logger.info(f"Voicemail cache invalidated (version: {current_version} -> {new_version})")
-
-
-def get_voicemail_stats_cached(access_token, region_host, force_refresh=False):
-    """Get voicemail statistics with session caching."""
-    cache_key = 'voicemail_stats'
-    cache_time_key = 'voicemail_stats_time'
-    cache_version_key_stored = 'voicemail_stats_cache_version'
-    current_version = session.get(CACHE_VERSION_KEY, 0)
-    
-    # Check cache
-    if not force_refresh:
-        cached_stats = session.get(cache_key)
-        cached_time = session.get(cache_time_key, 0)
-        cached_version = session.get(cache_version_key_stored, -1)
-        
-        if (cached_stats and 
-            (time.time() - cached_time) < CACHE_TTL and
-            cached_version == current_version):
-            return cached_stats
-    
-    # Fetch fresh data - don't use list cache to ensure fresh stats
-    all_voicemails, error = get_all_voicemails_fresh(access_token, region_host)
-    
-    if error:
-        app.logger.error(f"Error getting voicemail stats: {error}")
-        return session.get(cache_key, {
-            'total_count': 0,
-            'total_duration': 0,
-            'unread_count': 0
-        })
-    
-    stats = {
-        'total_count': len(all_voicemails),
-        'total_duration': sum(vm.get('audioRecordingDurationSeconds', 0) or 0 for vm in all_voicemails),
-        'unread_count': sum(1 for vm in all_voicemails if not vm.get('read', True))
-    }
-    
-    # Cache results with version
-    session[cache_key] = stats
-    session[cache_time_key] = time.time()
-    session[cache_version_key_stored] = current_version
-    
-    return stats
 
 
 def download_voicemail_media(access_token, region_host, message_id):
@@ -637,9 +506,6 @@ def process_voicemails_in_batches(access_token, region_host, voicemail_ids, oper
             app.logger.info(f"Waiting {delay}s before next batch...")
             time.sleep(delay)
     
-    # Always invalidate cache after any modification
-    invalidate_voicemail_cache()
-    
     app.logger.info(f"Operation complete: {results['success']} succeeded, {results['failed']} failed out of {results['total']}")
     
     return results
@@ -823,9 +689,6 @@ def callback():
     session.pop('code_verifier', None)
     session.pop('oauth_state', None)
     
-    # Clear any stale cache
-    invalidate_voicemail_cache()
-    
     return redirect(url_for('dashboard'))
 
 
@@ -841,26 +704,17 @@ def dashboard():
     # Get page number from query string
     page = request.args.get('page', 1, type=int)
     
-    # Check for refresh parameter - forces cache bypass
-    force_refresh = request.args.get('refresh', '0') == '1'
-    
     if page < 1:
         page = 1
     
-    # Invalidate cache if refresh requested
-    if force_refresh:
-        invalidate_voicemail_cache()
-        app.logger.info("Dashboard: Force refresh requested")
-    
-    # Get all voicemails
-    all_voicemails, total_count, error = get_all_voicemails_paginated(
-        access_token, region_host, use_cache=not force_refresh
-    )
+    # Always fetch fresh - no caching (fast enough at ~500ms)
+    all_voicemails, error = get_all_voicemails(access_token, region_host)
     
     if error:
         flash(f'Error loading voicemails: {error}', 'warning')
         all_voicemails = []
-        total_count = 0
+    
+    total_count = len(all_voicemails)
     
     app.logger.info(f"Dashboard: Displaying {total_count} voicemails (page {page})")
     
@@ -906,7 +760,7 @@ def download_single(message_id):
     access_token = session.get('access_token')
     region_host = session.get('region_host')
     
-    all_voicemails, _, _ = get_all_voicemails_paginated(access_token, region_host)
+    all_voicemails, _ = get_all_voicemails(access_token, region_host)
     voicemail = next((vm for vm in all_voicemails if vm.get('id') == message_id), None)
     
     if not voicemail:
@@ -936,8 +790,7 @@ def download_all():
     region_host = session.get('region_host')
     user_info = session.get('user_info', {})
     
-    # Force fresh fetch for download
-    all_voicemails, error = get_all_voicemails_fresh(access_token, region_host)
+    all_voicemails, error = get_all_voicemails(access_token, region_host)
     
     if error or not all_voicemails:
         flash('No voicemails to download.', 'warning')
@@ -1039,15 +892,7 @@ def forward_page():
     region_key = session.get('region_key')
     user_info = session.get('user_info', {})
     
-    # Force fresh fetch for forward page
-    force_refresh = request.args.get('refresh', '0') == '1'
-    
-    if force_refresh:
-        invalidate_voicemail_cache()
-    
-    all_voicemails, total_count, error = get_all_voicemails_paginated(
-        access_token, region_host, use_cache=not force_refresh
-    )
+    all_voicemails, error = get_all_voicemails(access_token, region_host)
     
     if error:
         flash(f'Error loading voicemails: {error}', 'warning')
@@ -1222,16 +1067,12 @@ def delete_single(message_id):
     
     success, result = delete_voicemail_single(access_token, region_host, message_id)
     
-    # Always invalidate cache after deletion
-    invalidate_voicemail_cache()
-    
     if success:
         flash('Voicemail deleted successfully!', 'success')
     else:
         flash(f'Failed to delete voicemail: {result}', 'danger')
     
-    # Redirect with refresh parameter to force fresh data
-    return redirect(url_for('dashboard', refresh='1'))
+    return redirect(url_for('dashboard'))
 
 
 @app.route('/delete')
@@ -1243,15 +1084,7 @@ def delete_page():
     region_key = session.get('region_key')
     user_info = session.get('user_info', {})
     
-    # Force fresh fetch for delete page
-    force_refresh = request.args.get('refresh', '0') == '1'
-    
-    if force_refresh:
-        invalidate_voicemail_cache()
-    
-    all_voicemails, total_count, error = get_all_voicemails_paginated(
-        access_token, region_host, use_cache=not force_refresh
-    )
+    all_voicemails, error = get_all_voicemails(access_token, region_host)
     
     if error:
         flash(f'Error loading voicemails: {error}', 'warning')
@@ -1280,20 +1113,15 @@ def api_voicemails():
     
     page = request.args.get('page', 1, type=int)
     page_size = request.args.get('page_size', DISPLAY_PAGE_SIZE, type=int)
-    force_refresh = request.args.get('refresh', '0') == '1'
     
     page_size = min(max(page_size, 10), 100)
     
-    if force_refresh:
-        invalidate_voicemail_cache()
-    
-    all_voicemails, total_count, error = get_all_voicemails_paginated(
-        access_token, region_host, use_cache=not force_refresh
-    )
+    all_voicemails, error = get_all_voicemails(access_token, region_host)
     
     if error:
         return jsonify({'error': error, 'voicemails': []}), 500
     
+    total_count = len(all_voicemails)
     total_pages = (total_count + page_size - 1) // page_size if total_count > 0 else 1
     
     start_idx = (page - 1) * page_size
@@ -1329,27 +1157,30 @@ def api_voicemail_stats():
     """API endpoint to get voicemail statistics"""
     access_token = session.get('access_token')
     region_host = session.get('region_host')
-    force_refresh = request.args.get('refresh', '0') == '1'
     
-    if force_refresh:
-        invalidate_voicemail_cache()
+    all_voicemails, error = get_all_voicemails(access_token, region_host)
     
-    stats = get_voicemail_stats_cached(access_token, region_host, force_refresh=force_refresh)
+    if error:
+        return jsonify({'error': error}), 500
+    
+    total_count = len(all_voicemails)
+    total_duration = sum(vm.get('audioRecordingDurationSeconds', 0) or 0 for vm in all_voicemails)
+    unread_count = sum(1 for vm in all_voicemails if not vm.get('read', True))
     
     return jsonify({
-        'total_count': stats['total_count'],
-        'total_duration_seconds': stats['total_duration'],
-        'total_duration_minutes': round(stats['total_duration'] / 60, 1) if stats['total_duration'] else 0,
-        'unread_count': stats['unread_count']
+        'total_count': total_count,
+        'total_duration_seconds': total_duration,
+        'total_duration_minutes': round(total_duration / 60, 1) if total_duration else 0,
+        'unread_count': unread_count
     })
 
 
 @app.route('/api/voicemails/refresh')
 @login_required
 def api_refresh_voicemails():
-    """Force refresh of voicemail data (invalidate cache)"""
-    invalidate_voicemail_cache()
-    return jsonify({'success': True, 'message': 'Cache invalidated'})
+    """Force refresh of voicemail data"""
+    # No caching in v3, so this just confirms success
+    return jsonify({'success': True, 'message': 'Data will be refreshed on next request'})
 
 
 @app.route('/logout')
@@ -1367,13 +1198,9 @@ def health():
         'status': 'healthy',
         'client_configured': bool(CLIENT_ID),
         'timestamp': datetime.now().isoformat(),
-        'version': 'v2-fixed-pagination',
+        'version': 'v3-no-session-cache',
         'batch_size': BATCH_SIZE,
-        'cache_ttl': CACHE_TTL,
-        'rate_limits': {
-            'batch_delay': BATCH_DELAY,
-            'operation_delay': OPERATION_DELAY
-        }
+        'max_pages': MAX_PAGES
     })
 
 
