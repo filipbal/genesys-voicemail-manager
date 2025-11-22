@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: voicemail-exporter
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
+    envVars:
+      - key: GENESYS_CLIENT_ID
+        sync: false
+      - key: REDIRECT_URI
+        sync: false
+      - key: FLASK_SECRET_KEY
+        generateValue: true
