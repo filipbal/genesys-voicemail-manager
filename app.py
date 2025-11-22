@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
 """
-Genesys Cloud Voicemail Web Exporter - FIXED VERSION v4
+Genesys Cloud Voicemail Web Exporter - FIXED VERSION v5
 ========================================================
-CRITICAL FIX: Proper counting of voicemails
+CRITICAL FIX: Accurate voicemail counting
 
-The Genesys API returns a stale 'total' field that updates in increments of 25.
-This version IGNORES the API's total and counts actual entities from each page.
+PROBLEM: The Genesys API's 'total' field is STALE - it updates in batches of 25.
+This causes incorrect counts after deletions (500 VMs -> delete 1 -> still shows 500).
 
-Strategy:
-1. Fetch all pages based on API's pageCount
-2. Filter out deleted voicemails from each page
-3. SUM the actual non-deleted entities for the true count
-4. Never trust API's 'total' field
+SOLUTION: NEVER trust the API's 'total' field. Instead:
+1. Fetch pages until we get an empty page or partial page
+2. The API already filters deleted voicemails (state != 'deleted')
+3. Count the actual entities returned = TRUE TOTAL
+
+This is the most straightforward approach that ensures accuracy.
 """
 
 import os
@@ -65,19 +66,20 @@ os.makedirs(TEMP_DIR, exist_ok=True)
 # CONFIGURATION
 # ============================================================================
 
-API_PAGE_SIZE = 100
-DISPLAY_PAGE_SIZE = 50
+API_PAGE_SIZE = 100  # Max items per API page
+DISPLAY_PAGE_SIZE = 50  # Items per UI page
 
+# Batch processing settings
 BATCH_SIZE = 20
 BATCH_DELAY = 3.0
 OPERATION_DELAY = 0.2
 RATE_LIMIT_BACKOFF = 10.0
 MAX_RETRIES = 5
-
 SUPER_BATCH_SIZE = 5
 SUPER_BATCH_DELAY = 10.0
 
-MAX_PAGES = 50  # Safety limit: 50 pages * 100 = 5000 voicemails max
+# Safety limit: 50 pages * 100 items = 5000 voicemails max
+MAX_PAGES = 50
 
 
 # ============================================================================
@@ -144,6 +146,7 @@ def exchange_code_for_token(auth_code, region_host, code_verifier):
 # ============================================================================
 
 def make_api_request(url, access_token, method='GET', data=None, retries=MAX_RETRIES):
+    """Make API request with retry logic for rate limiting"""
     req = urllib.request.Request(url, method=method)
     req.add_header('Authorization', f'Bearer {access_token}')
     
@@ -159,6 +162,7 @@ def make_api_request(url, access_token, method='GET', data=None, retries=MAX_RET
             return json.loads(response.read().decode()), None
             
     except urllib.request.HTTPError as e:
+        # Handle rate limiting with retry
         if e.code == 429 and retries > 0:
             retry_after = e.headers.get('Retry-After', RATE_LIMIT_BACKOFF)
             try:
@@ -187,6 +191,7 @@ def make_api_request(url, access_token, method='GET', data=None, retries=MAX_RET
 # ============================================================================
 
 def get_user_info(access_token, region_host):
+    """Get current user information"""
     url = f"https://api.{region_host}/api/v2/users/me"
     data, error = make_api_request(url, access_token)
     
@@ -196,89 +201,93 @@ def get_user_info(access_token, region_host):
     return data
 
 
-def is_voicemail_deleted(vm):
-    """Check if a voicemail is marked as deleted."""
-    if vm.get('deleted', False):
-        return True
-    if vm.get('state', '').lower() == 'deleted':
-        return True
-    if vm.get('deletedDate') is not None:
-        return True
-    return False
-
-
 def get_all_voicemails(access_token, region_host):
     """
     Get ALL voicemails with ACCURATE count.
     
-    CRITICAL: We do NOT trust API's 'total' field - it's stale (updates in batches of 25).
+    CRITICAL: The Genesys API's 'total' field is STALE - it updates in batches of 25.
     
-    Instead, we:
-    1. Fetch page 1 to get pageCount
-    2. Fetch all pages up to pageCount
-    3. Filter out deleted voicemails from EACH page
-    4. Count actual non-deleted entities = TRUE TOTAL
+    The API already filters out deleted voicemails (they're not included in entities).
+    So we just need to:
+    1. Fetch pages until we get an empty page or a page with fewer items than pageSize
+    2. Count the actual entities returned
+    3. This gives us the TRUE total
     
     Returns: (list of all active voicemails sorted by date desc, error)
     """
     all_voicemails = []
     page_number = 1
-    api_page_count = 1
     
-    app.logger.info("Fetching all voicemails...")
+    app.logger.info("Fetching all voicemails (counting actual entities, ignoring API's stale 'total' field)...")
     
-    while page_number <= min(api_page_count, MAX_PAGES):
+    while page_number <= MAX_PAGES:
         # Fetch page
         url = f"https://api.{region_host}/api/v2/voicemail/messages"
-        params = {'pageSize': API_PAGE_SIZE, 'pageNumber': page_number}
+        params = {
+            'pageSize': API_PAGE_SIZE,
+            'pageNumber': page_number
+        }
         url_with_params = f"{url}?{urllib.parse.urlencode(params)}"
         
         data, error = make_api_request(url_with_params, access_token)
         
         if error:
             app.logger.error(f"Error fetching page {page_number}: {error}")
+            if page_number == 1:
+                # If first page fails, return error
+                return None, error
+            # If later page fails, return what we have
             break
         
         entities = data.get('entities', [])
         
-        # Get pageCount from first request (use it as guide, but don't trust total)
+        # Log API's claim vs reality on first page (for debugging)
         if page_number == 1:
-            api_page_count = data.get('pageCount', 1)
             api_total = data.get('total', 0)
-            app.logger.info(f"API claims total={api_total}, pageCount={api_page_count} (we will count actual entities)")
+            api_page_count = data.get('pageCount', 1)
+            app.logger.info(
+                f"API reports total={api_total}, pageCount={api_page_count} "
+                f"(IGNORING - will count actual entities)"
+            )
         
         # If page is empty, we're done
         if not entities:
-            app.logger.info(f"Page {page_number} is empty, stopping")
+            app.logger.debug(f"Page {page_number} is empty, stopping pagination")
             break
         
-        # Filter out deleted voicemails and count ACTUAL items
-        page_active = []
-        page_deleted = 0
+        # Add this page's entities (API already filtered out deleted ones)
+        all_voicemails.extend(entities)
+        app.logger.debug(
+            f"Page {page_number}: fetched {len(entities)} voicemails "
+            f"(running total: {len(all_voicemails)})"
+        )
         
-        for vm in entities:
-            if is_voicemail_deleted(vm):
-                page_deleted += 1
-            else:
-                page_active.append(vm)
-        
-        all_voicemails.extend(page_active)
-        
-        app.logger.debug(f"Page {page_number}/{api_page_count}: {len(entities)} entities, {len(page_active)} active, {page_deleted} deleted")
+        # Check if we got fewer items than page size - indicates last page
+        if len(entities) < API_PAGE_SIZE:
+            app.logger.debug(
+                f"Partial page received ({len(entities)} < {API_PAGE_SIZE}), "
+                f"this is the last page"
+            )
+            break
         
         page_number += 1
         
-        # Small delay between pages
-        if page_number <= api_page_count:
-            time.sleep(0.05)
+        # Small delay between pages to be nice to API
+        time.sleep(0.05)
     
     # Sort by date descending (newest first)
-    all_voicemails.sort(key=lambda vm: vm.get('createdDate', '') or '', reverse=True)
+    all_voicemails.sort(
+        key=lambda vm: vm.get('createdDate', '') or '', 
+        reverse=True
+    )
     
-    # THE TRUE COUNT - from actual entities we fetched and filtered
+    # THE TRUE COUNT - from actual entities we fetched
     true_count = len(all_voicemails)
     
-    app.logger.info(f"ACTUAL COUNT: {true_count} active voicemails (fetched {page_number - 1} pages)")
+    app.logger.info(
+        f"✓ ACTUAL COUNT: {true_count} voicemails "
+        f"(fetched from {page_number} pages)"
+    )
     
     return all_voicemails, None
 
@@ -297,6 +306,7 @@ def download_voicemail_media(access_token, region_host, message_id):
             content_type = response.headers.get('Content-Type', '')
             
             if 'application/json' in content_type:
+                # Response contains media URI
                 data = json.loads(response.read().decode())
                 if 'mediaFileUri' in data:
                     media_req = urllib.request.Request(data['mediaFileUri'])
@@ -304,11 +314,12 @@ def download_voicemail_media(access_token, region_host, message_id):
                         return media_response.read(), None
                 return None, "No media URI in response"
             else:
+                # Direct media download
                 return response.read(), None
                 
     except urllib.request.HTTPError as e:
         if e.code == 403:
-            return None, "Access denied"
+            return None, "Access denied - you may not own this voicemail"
         return None, f"HTTP {e.code}: {e.reason}"
     except Exception as e:
         return None, str(e)
@@ -367,7 +378,7 @@ def search_groups(access_token, region_host, query):
 # ============================================================================
 
 def forward_voicemail_single(access_token, region_host, voicemail_id, target_id, target_type='user'):
-    """Forward a single voicemail"""
+    """Forward a single voicemail to a user or group"""
     url = f"https://api.{region_host}/api/v2/voicemail/messages"
     
     if target_type == 'group':
@@ -399,7 +410,14 @@ def delete_voicemail_single(access_token, region_host, voicemail_id):
 
 def process_voicemails_in_batches(access_token, region_host, voicemail_ids, operation, 
                                    target_id=None, target_type='user'):
-    """Process voicemails in batches to avoid rate limiting."""
+    """
+    Process voicemails in batches to avoid rate limiting.
+    
+    Args:
+        operation: 'forward' or 'delete'
+        target_id: Required for forward operation
+        target_type: 'user' or 'group' for forward operation
+    """
     results = {
         'success': 0,
         'failed': 0,
@@ -420,6 +438,7 @@ def process_voicemails_in_batches(access_token, region_host, voicemail_ids, oper
         batch = voicemail_ids[batch_start:batch_end]
         batch_num = (batch_start // BATCH_SIZE) + 1
         
+        # Super batch break every SUPER_BATCH_SIZE batches
         if batches_since_super_break >= SUPER_BATCH_SIZE and batch_num > 1:
             app.logger.info(f"Super batch break: {SUPER_BATCH_DELAY}s...")
             time.sleep(SUPER_BATCH_DELAY)
@@ -428,6 +447,7 @@ def process_voicemails_in_batches(access_token, region_host, voicemail_ids, oper
         
         batch_failures = 0
         
+        # Process each item in the batch
         for idx, vm_id in enumerate(batch):
             try:
                 if operation == 'forward':
@@ -448,13 +468,16 @@ def process_voicemails_in_batches(access_token, region_host, voicemail_ids, oper
                     batch_failures += 1
                     consecutive_failures += 1
                     
+                    # If we have many consecutive failures, take a longer break
                     if consecutive_failures >= 3:
+                        app.logger.warning("Multiple consecutive failures, taking extended break...")
                         time.sleep(SUPER_BATCH_DELAY * 2)
                         consecutive_failures = 0
                         batches_since_super_break = 0
                 
                 results['processed'] += 1
                 
+                # Delay between operations within a batch
                 if idx < len(batch) - 1:
                     time.sleep(OPERATION_DELAY)
                     
@@ -465,11 +488,16 @@ def process_voicemails_in_batches(access_token, region_host, voicemail_ids, oper
         
         batches_since_super_break += 1
         
+        # Delay between batches (longer if batch had failures)
         if batch_end < total_ids:
             delay = BATCH_DELAY * 2 if batch_failures > 0 else BATCH_DELAY
+            app.logger.debug(f"Batch {batch_num}/{total_batches} complete, waiting {delay}s...")
             time.sleep(delay)
     
-    app.logger.info(f"Operation complete: {results['success']} success, {results['failed']} failed")
+    app.logger.info(
+        f"Operation complete: {results['success']} success, "
+        f"{results['failed']} failed out of {results['total']}"
+    )
     
     return results
 
@@ -479,7 +507,7 @@ def process_voicemails_in_batches(access_token, region_host, voicemail_ids, oper
 # ============================================================================
 
 def format_voicemail(vm):
-    """Format voicemail for display"""
+    """Format voicemail data for display"""
     return {
         'id': vm.get('id'),
         'caller_name': vm.get('callerName', 'Unknown'),
@@ -494,7 +522,7 @@ def format_voicemail(vm):
 
 
 def format_filename(voicemail):
-    """Generate safe filename"""
+    """Generate safe filename for voicemail"""
     msg_id = voicemail.get('id', 'unknown')
     caller_name = voicemail.get('callerName', 'Unknown')
     created_date = voicemail.get('createdDate', '')
@@ -508,13 +536,17 @@ def format_filename(voicemail):
     else:
         date_str = 'unknown'
     
-    safe_caller = ''.join(c if c.isalnum() or c in ' -_' else '_' for c in str(caller_name))[:30]
+    # Sanitize caller name
+    safe_caller = ''.join(
+        c if c.isalnum() or c in ' -_' else '_' 
+        for c in str(caller_name)
+    )[:30]
     
     return f"{date_str}_{safe_caller}_{msg_id[:8]}.wav"
 
 
 def format_duration(seconds):
-    """Format duration"""
+    """Format duration in seconds to human readable string"""
     if not seconds:
         return "Unknown"
     
@@ -527,7 +559,7 @@ def format_duration(seconds):
 
 
 def format_datetime(date_string):
-    """Format datetime"""
+    """Format ISO datetime string to readable format"""
     if not date_string:
         return "Unknown"
     
@@ -539,7 +571,7 @@ def format_datetime(date_string):
 
 
 def cleanup_old_exports():
-    """Clean up old export files"""
+    """Clean up export files older than 1 hour"""
     try:
         now = time.time()
         for item in os.listdir(TEMP_DIR):
@@ -558,9 +590,10 @@ def cleanup_old_exports():
 
 @app.route('/')
 def index():
-    """Home page"""
+    """Home page with login form"""
     cleanup_old_exports()
     
+    # If already logged in, redirect to dashboard
     if 'access_token' in session and 'user_info' in session:
         return redirect(url_for('dashboard'))
     
@@ -571,27 +604,30 @@ def index():
 
 @app.route('/login', methods=['POST'])
 def login():
-    """Initiate OAuth login"""
+    """Initiate OAuth login flow"""
     if not CLIENT_ID:
-        flash('OAuth not configured.', 'danger')
+        flash('OAuth client not configured.', 'danger')
         return redirect(url_for('index'))
     
     region_key = request.form.get('region')
     if region_key not in REGIONS:
-        flash('Invalid region.', 'danger')
+        flash('Invalid region selected.', 'danger')
         return redirect(url_for('index'))
     
     region = REGIONS[region_key]
     
+    # Generate PKCE codes
     code_verifier = generate_code_verifier()
     code_challenge = generate_code_challenge(code_verifier)
     state = generate_state()
     
+    # Store in session
     session['code_verifier'] = code_verifier
     session['oauth_state'] = state
     session['region_key'] = region_key
     session['region_host'] = region['host']
     
+    # Build authorization URL
     auth_params = {
         'client_id': CLIENT_ID,
         'response_type': 'code',
@@ -608,42 +644,50 @@ def login():
 
 @app.route('/callback')
 def callback():
-    """OAuth callback"""
+    """OAuth callback handler"""
+    # Check for errors
     error = request.args.get('error')
     if error:
         flash(f'Login failed: {request.args.get("error_description", error)}', 'danger')
         return redirect(url_for('index'))
     
+    # Verify state
     state = request.args.get('state')
     if state != session.get('oauth_state'):
-        flash('Invalid state.', 'danger')
+        flash('Invalid state parameter. Please try again.', 'danger')
         return redirect(url_for('index'))
     
+    # Get authorization code
     auth_code = request.args.get('code')
     if not auth_code:
-        flash('No authorization code.', 'danger')
+        flash('No authorization code received.', 'danger')
         return redirect(url_for('index'))
     
+    # Get code verifier and region from session
     code_verifier = session.get('code_verifier')
     region_host = session.get('region_host')
     
     if not code_verifier or not region_host:
-        flash('Session expired.', 'danger')
+        flash('Session expired. Please try again.', 'danger')
         return redirect(url_for('index'))
     
+    # Exchange code for token
     access_token, error = exchange_code_for_token(auth_code, region_host, code_verifier)
     
     if error:
-        flash(f'Token error: {error}', 'danger')
+        flash(f'Token exchange failed: {error}', 'danger')
         return redirect(url_for('index'))
     
+    # Store access token
     session['access_token'] = access_token
     
+    # Get user info
     user_info = get_user_info(access_token, region_host)
     if user_info:
         session['user_info'] = user_info
         flash(f'Welcome, {user_info.get("name", "User")}!', 'success')
     
+    # Clean up temporary session data
     session.pop('code_verifier', None)
     session.pop('oauth_state', None)
     
@@ -653,40 +697,55 @@ def callback():
 @app.route('/dashboard')
 @login_required
 def dashboard():
-    """Main dashboard - shows voicemails with ACCURATE count"""
+    """
+    Main dashboard - shows voicemails with ACCURATE count.
+    
+    The count is based on actual entities fetched, NOT the API's stale 'total' field.
+    """
     access_token = session.get('access_token')
     region_host = session.get('region_host')
     region_key = session.get('region_key')
     user_info = session.get('user_info', {})
     
+    # Get page number from query params
     page = request.args.get('page', 1, type=int)
     if page < 1:
         page = 1
     
-    # Fetch ALL voicemails - count is from actual entities, NOT API's 'total'
+    # Fetch ALL voicemails - count is from ACTUAL entities, NOT API's 'total'
     all_voicemails, error = get_all_voicemails(access_token, region_host)
     
     if error:
-        flash(f'Error: {error}', 'warning')
+        flash(f'Error fetching voicemails: {error}', 'warning')
         all_voicemails = []
     
     # TRUE COUNT from actual fetched entities
     total_count = len(all_voicemails)
     
     # Calculate pagination
-    total_pages = (total_count + DISPLAY_PAGE_SIZE - 1) // DISPLAY_PAGE_SIZE if total_count > 0 else 1
+    total_pages = (
+        (total_count + DISPLAY_PAGE_SIZE - 1) // DISPLAY_PAGE_SIZE 
+        if total_count > 0 
+        else 1
+    )
     
+    # Adjust page if out of range
     if page > total_pages:
         page = total_pages
     
+    # Get voicemails for current page
     start_idx = (page - 1) * DISPLAY_PAGE_SIZE
     end_idx = start_idx + DISPLAY_PAGE_SIZE
     page_voicemails = all_voicemails[start_idx:end_idx]
     
+    # Format voicemails for display
     processed_voicemails = [format_voicemail(vm) for vm in page_voicemails]
     
-    # Stats from actual data
-    total_duration = sum(vm.get('audioRecordingDurationSeconds', 0) or 0 for vm in all_voicemails)
+    # Calculate stats from actual data
+    total_duration = sum(
+        vm.get('audioRecordingDurationSeconds', 0) or 0 
+        for vm in all_voicemails
+    )
     unread_count = sum(1 for vm in all_voicemails if not vm.get('read', True))
     total_duration_minutes = round(total_duration / 60, 1) if total_duration else 0
     
@@ -694,7 +753,7 @@ def dashboard():
                          user_info=user_info,
                          region=REGIONS.get(region_key, {}),
                          voicemails=processed_voicemails,
-                         voicemail_count=total_count,
+                         voicemail_count=total_count,  # ACCURATE count
                          total_duration_minutes=total_duration_minutes,
                          unread_count=unread_count,
                          current_page=page,
@@ -709,10 +768,11 @@ def dashboard():
 @app.route('/download/<message_id>')
 @login_required
 def download_single(message_id):
-    """Download single voicemail"""
+    """Download a single voicemail as WAV file"""
     access_token = session.get('access_token')
     region_host = session.get('region_host')
     
+    # Get voicemail info
     all_voicemails, _ = get_all_voicemails(access_token, region_host)
     voicemail = next((vm for vm in all_voicemails if vm.get('id') == message_id), None)
     
@@ -720,6 +780,7 @@ def download_single(message_id):
         flash('Voicemail not found.', 'danger')
         return redirect(url_for('dashboard'))
     
+    # Download media
     media_bytes, error = download_voicemail_media(access_token, region_host, message_id)
     
     if error:
@@ -738,37 +799,44 @@ def download_single(message_id):
 @app.route('/download-all')
 @login_required
 def download_all():
-    """Download all voicemails as ZIP"""
+    """Download all voicemails as a ZIP archive"""
     access_token = session.get('access_token')
     region_host = session.get('region_host')
     user_info = session.get('user_info', {})
     
+    # Get all voicemails
     all_voicemails, error = get_all_voicemails(access_token, region_host)
     
     if error or not all_voicemails:
-        flash('No voicemails.', 'warning')
+        flash('No voicemails to download.', 'warning')
         return redirect(url_for('dashboard'))
     
+    # Create export directory
     user_name = user_info.get('name', 'Unknown').replace(' ', '_')
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     export_name = f"voicemails_{user_name}_{timestamp}"
     export_dir = os.path.join(TEMP_DIR, export_name)
     os.makedirs(export_dir, exist_ok=True)
     
+    # Download voicemails in batches
     downloaded = 0
     errors = []
     total_items = len(all_voicemails)
     batches_since_super_break = 0
+    
+    app.logger.info(f"Starting bulk download of {total_items} voicemails")
     
     for batch_start in range(0, total_items, BATCH_SIZE):
         batch_end = min(batch_start + BATCH_SIZE, total_items)
         batch = all_voicemails[batch_start:batch_end]
         batch_num = (batch_start // BATCH_SIZE) + 1
         
+        # Super batch break
         if batches_since_super_break >= SUPER_BATCH_SIZE and batch_num > 1:
             time.sleep(SUPER_BATCH_DELAY)
             batches_since_super_break = 0
         
+        # Download batch
         for idx, vm in enumerate(batch):
             msg_id = vm.get('id')
             filename = format_filename(vm)
@@ -783,14 +851,17 @@ def download_all():
                     f.write(media_bytes)
                 downloaded += 1
             
+            # Delay between downloads
             if idx < len(batch) - 1:
                 time.sleep(OPERATION_DELAY)
         
         batches_since_super_break += 1
         
+        # Delay between batches
         if batch_end < total_items:
             time.sleep(BATCH_DELAY)
     
+    # Save metadata
     metadata_file = os.path.join(export_dir, 'metadata.json')
     with open(metadata_file, 'w', encoding='utf-8') as f:
         json.dump({
@@ -801,6 +872,7 @@ def download_all():
             'errors': errors
         }, f, indent=2, default=str)
     
+    # Create ZIP
     zip_path = os.path.join(TEMP_DIR, f"{export_name}.zip")
     with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
         for root, dirs, files in os.walk(export_dir):
@@ -809,10 +881,11 @@ def download_all():
                 arcname = os.path.relpath(file_path, export_dir)
                 zipf.write(file_path, arcname)
     
+    # Clean up temp directory
     shutil.rmtree(export_dir, ignore_errors=True)
     
     if errors:
-        flash(f'Downloaded {downloaded}/{len(all_voicemails)}. Some failed.', 'warning')
+        flash(f'Downloaded {downloaded}/{len(all_voicemails)} voicemails. Some failed.', 'warning')
     
     return send_file(
         zip_path,
@@ -825,16 +898,17 @@ def download_all():
 @app.route('/forward')
 @login_required
 def forward_page():
-    """Forward page"""
+    """Forward voicemails page"""
     access_token = session.get('access_token')
     region_host = session.get('region_host')
     region_key = session.get('region_key')
     user_info = session.get('user_info', {})
     
+    # Get all voicemails
     all_voicemails, error = get_all_voicemails(access_token, region_host)
     
     if error:
-        flash(f'Error: {error}', 'warning')
+        flash(f'Error fetching voicemails: {error}', 'warning')
         all_voicemails = []
     
     processed_voicemails = [format_voicemail(vm) for vm in all_voicemails]
@@ -847,164 +921,20 @@ def forward_page():
                          batch_size=BATCH_SIZE)
 
 
-@app.route('/api/search/users')
-@login_required
-def api_search_users():
-    """Search users API"""
-    access_token = session.get('access_token')
-    region_host = session.get('region_host')
-    
-    query = request.args.get('q', '').strip()
-    if len(query) < 2:
-        return jsonify({'users': []})
-    
-    users, error = search_users(access_token, region_host, query)
-    
-    if error:
-        return jsonify({'users': [], 'error': error})
-    
-    formatted = [{'id': u.get('id'), 'name': u.get('name'), 'email': u.get('email')} for u in (users or [])]
-    
-    return jsonify({'users': formatted})
-
-
-@app.route('/api/search/groups')
-@login_required
-def api_search_groups():
-    """Search groups API"""
-    access_token = session.get('access_token')
-    region_host = session.get('region_host')
-    
-    query = request.args.get('q', '').strip()
-    if len(query) < 2:
-        return jsonify({'groups': []})
-    
-    groups, error = search_groups(access_token, region_host, query)
-    
-    if error:
-        return jsonify({'groups': [], 'error': error})
-    
-    formatted = [{'id': g.get('id'), 'name': g.get('name'), 'memberCount': g.get('memberCount', 0)} for g in (groups or [])]
-    
-    return jsonify({'groups': formatted})
-
-
-@app.route('/api/forward', methods=['POST'])
-@login_required
-def api_forward_voicemails():
-    """Forward voicemails API"""
-    access_token = session.get('access_token')
-    region_host = session.get('region_host')
-    
-    data = request.get_json()
-    if not data:
-        return jsonify({'success': False, 'error': 'No data'}), 400
-    
-    voicemail_ids = data.get('voicemail_ids', [])
-    target_id = data.get('target_id')
-    target_type = data.get('target_type', 'user')
-    
-    if not voicemail_ids or not target_id:
-        return jsonify({'success': False, 'error': 'Missing data'}), 400
-    
-    results = process_voicemails_in_batches(
-        access_token, region_host, voicemail_ids, 'forward',
-        target_id=target_id, target_type=target_type
-    )
-    
-    return jsonify({
-        'success': results['failed'] == 0,
-        'forwarded': results['success'],
-        'failed': results['failed'],
-        'total': results['total'],
-        'errors': results['errors'][:10]
-    })
-
-
-@app.route('/forward/single/<message_id>', methods=['POST'])
-@login_required
-def forward_single(message_id):
-    """Forward single voicemail"""
-    access_token = session.get('access_token')
-    region_host = session.get('region_host')
-    
-    target_id = request.form.get('target_id')
-    target_type = request.form.get('target_type', 'user')
-    target_name = request.form.get('target_name', 'Unknown')
-    
-    if not target_id:
-        flash('Select a recipient.', 'danger')
-        return redirect(url_for('dashboard'))
-    
-    success, result = forward_voicemail_single(access_token, region_host, message_id, target_id, target_type)
-    
-    if success:
-        flash(f'Forwarded to {target_name}!', 'success')
-    else:
-        flash(f'Failed: {result}', 'danger')
-    
-    return redirect(url_for('dashboard'))
-
-
-@app.route('/api/delete', methods=['POST'])
-@login_required
-def api_delete_voicemails():
-    """Delete voicemails API"""
-    access_token = session.get('access_token')
-    region_host = session.get('region_host')
-    
-    data = request.get_json()
-    if not data:
-        return jsonify({'success': False, 'error': 'No data'}), 400
-    
-    voicemail_ids = data.get('voicemail_ids', [])
-    
-    if not voicemail_ids:
-        return jsonify({'success': False, 'error': 'No voicemails'}), 400
-    
-    results = process_voicemails_in_batches(
-        access_token, region_host, voicemail_ids, 'delete'
-    )
-    
-    return jsonify({
-        'success': results['failed'] == 0,
-        'deleted': results['success'],
-        'failed': results['failed'],
-        'total': results['total'],
-        'errors': results['errors'][:10]
-    })
-
-
-@app.route('/delete/single/<message_id>', methods=['POST'])
-@login_required
-def delete_single(message_id):
-    """Delete single voicemail"""
-    access_token = session.get('access_token')
-    region_host = session.get('region_host')
-    
-    success, result = delete_voicemail_single(access_token, region_host, message_id)
-    
-    if success:
-        flash('Deleted!', 'success')
-    else:
-        flash(f'Failed: {result}', 'danger')
-    
-    return redirect(url_for('dashboard'))
-
-
 @app.route('/delete')
 @login_required
 def delete_page():
-    """Delete page"""
+    """Delete voicemails page"""
     access_token = session.get('access_token')
     region_host = session.get('region_host')
     region_key = session.get('region_key')
     user_info = session.get('user_info', {})
     
+    # Get all voicemails
     all_voicemails, error = get_all_voicemails(access_token, region_host)
     
     if error:
-        flash(f'Error: {error}', 'warning')
+        flash(f'Error fetching voicemails: {error}', 'warning')
         all_voicemails = []
     
     processed_voicemails = [format_voicemail(vm) for vm in all_voicemails]
@@ -1017,17 +947,141 @@ def delete_page():
                          batch_size=BATCH_SIZE)
 
 
+# ============================================================================
+# API ROUTES
+# ============================================================================
+
+@app.route('/api/search/users')
+@login_required
+def api_search_users():
+    """Search users by name or email"""
+    access_token = session.get('access_token')
+    region_host = session.get('region_host')
+    
+    query = request.args.get('q', '').strip()
+    if len(query) < 2:
+        return jsonify({'users': []})
+    
+    users, error = search_users(access_token, region_host, query)
+    
+    if error:
+        return jsonify({'users': [], 'error': error})
+    
+    formatted = [
+        {
+            'id': u.get('id'), 
+            'name': u.get('name'), 
+            'email': u.get('email')
+        } 
+        for u in (users or [])
+    ]
+    
+    return jsonify({'users': formatted})
+
+
+@app.route('/api/search/groups')
+@login_required
+def api_search_groups():
+    """Search groups by name"""
+    access_token = session.get('access_token')
+    region_host = session.get('region_host')
+    
+    query = request.args.get('q', '').strip()
+    if len(query) < 2:
+        return jsonify({'groups': []})
+    
+    groups, error = search_groups(access_token, region_host, query)
+    
+    if error:
+        return jsonify({'groups': [], 'error': error})
+    
+    formatted = [
+        {
+            'id': g.get('id'), 
+            'name': g.get('name'), 
+            'memberCount': g.get('memberCount', 0)
+        } 
+        for g in (groups or [])
+    ]
+    
+    return jsonify({'groups': formatted})
+
+
+@app.route('/api/forward', methods=['POST'])
+@login_required
+def api_forward_voicemails():
+    """Forward voicemails in batches"""
+    access_token = session.get('access_token')
+    region_host = session.get('region_host')
+    
+    data = request.get_json()
+    if not data:
+        return jsonify({'success': False, 'error': 'No data provided'}), 400
+    
+    voicemail_ids = data.get('voicemail_ids', [])
+    target_id = data.get('target_id')
+    target_type = data.get('target_type', 'user')
+    
+    if not voicemail_ids or not target_id:
+        return jsonify({'success': False, 'error': 'Missing required data'}), 400
+    
+    # Process in batches
+    results = process_voicemails_in_batches(
+        access_token, region_host, voicemail_ids, 'forward',
+        target_id=target_id, target_type=target_type
+    )
+    
+    return jsonify({
+        'success': results['failed'] == 0,
+        'forwarded': results['success'],
+        'failed': results['failed'],
+        'total': results['total'],
+        'errors': results['errors'][:10]  # Limit errors to first 10
+    })
+
+
+@app.route('/api/delete', methods=['POST'])
+@login_required
+def api_delete_voicemails():
+    """Delete voicemails in batches"""
+    access_token = session.get('access_token')
+    region_host = session.get('region_host')
+    
+    data = request.get_json()
+    if not data:
+        return jsonify({'success': False, 'error': 'No data provided'}), 400
+    
+    voicemail_ids = data.get('voicemail_ids', [])
+    
+    if not voicemail_ids:
+        return jsonify({'success': False, 'error': 'No voicemails selected'}), 400
+    
+    # Process in batches
+    results = process_voicemails_in_batches(
+        access_token, region_host, voicemail_ids, 'delete'
+    )
+    
+    return jsonify({
+        'success': results['failed'] == 0,
+        'deleted': results['success'],
+        'failed': results['failed'],
+        'total': results['total'],
+        'errors': results['errors'][:10]  # Limit errors to first 10
+    })
+
+
 @app.route('/api/voicemails')
 @login_required
 def api_voicemails():
-    """Get voicemails API"""
+    """Get voicemails list (JSON API) with accurate count"""
     access_token = session.get('access_token')
     region_host = session.get('region_host')
     
     page = request.args.get('page', 1, type=int)
     page_size = request.args.get('page_size', DISPLAY_PAGE_SIZE, type=int)
-    page_size = min(max(page_size, 10), 100)
+    page_size = min(max(page_size, 10), 100)  # Clamp between 10 and 100
     
+    # Get all voicemails with accurate count
     all_voicemails, error = get_all_voicemails(access_token, region_host)
     
     if error:
@@ -1036,10 +1090,12 @@ def api_voicemails():
     total_count = len(all_voicemails)
     total_pages = (total_count + page_size - 1) // page_size if total_count > 0 else 1
     
+    # Get page of voicemails
     start_idx = (page - 1) * page_size
     end_idx = start_idx + page_size
     page_voicemails = all_voicemails[start_idx:end_idx]
     
+    # Minimal format for API
     processed = [{
         'id': vm.get('id'),
         'caller_name': vm.get('callerName', 'Unknown'),
@@ -1064,7 +1120,7 @@ def api_voicemails():
 @app.route('/api/voicemails/stats')
 @login_required
 def api_voicemail_stats():
-    """Get voicemail stats API"""
+    """Get voicemail statistics with accurate count"""
     access_token = session.get('access_token')
     region_host = session.get('region_host')
     
@@ -1074,7 +1130,10 @@ def api_voicemail_stats():
         return jsonify({'error': error}), 500
     
     total_count = len(all_voicemails)
-    total_duration = sum(vm.get('audioRecordingDurationSeconds', 0) or 0 for vm in all_voicemails)
+    total_duration = sum(
+        vm.get('audioRecordingDurationSeconds', 0) or 0 
+        for vm in all_voicemails
+    )
     unread_count = sum(1 for vm in all_voicemails if not vm.get('read', True))
     
     return jsonify({
@@ -1085,20 +1144,24 @@ def api_voicemail_stats():
     })
 
 
+# ============================================================================
+# UTILITY ROUTES
+# ============================================================================
+
 @app.route('/logout')
 def logout():
-    """Logout"""
+    """Clear session and logout"""
     session.clear()
-    flash('Logged out.', 'info')
+    flash('You have been logged out.', 'info')
     return redirect(url_for('index'))
 
 
 @app.route('/health')
 def health():
-    """Health check"""
+    """Health check endpoint"""
     return jsonify({
         'status': 'healthy',
-        'version': 'v4-accurate-count',
+        'version': 'v5-accurate-count',
         'timestamp': datetime.now().isoformat()
     })
 
@@ -1109,25 +1172,43 @@ def documentation():
     return render_template('documentation.html')
 
 
+# ============================================================================
+# ERROR HANDLERS
+# ============================================================================
+
 @app.errorhandler(404)
 def not_found(e):
-    return render_template('error.html', error_code=404, error_message='Not found'), 404
+    return render_template('error.html', 
+                         error_code=404, 
+                         error_message='Page not found'), 404
 
 
 @app.errorhandler(500)
 def server_error(e):
-    return render_template('error.html', error_code=500, error_message='Server error'), 500
+    return render_template('error.html', 
+                         error_code=500, 
+                         error_message='Internal server error'), 500
 
+
+# ============================================================================
+# TEMPLATE FILTERS
+# ============================================================================
 
 @app.template_filter('datetime')
 def datetime_filter(value):
+    """Format datetime for templates"""
     return format_datetime(value)
 
 
 @app.template_filter('duration')
 def duration_filter(value):
+    """Format duration for templates"""
     return format_duration(value)
 
+
+# ============================================================================
+# MAIN
+# ============================================================================
 
 if __name__ == '__main__':
     app.run(debug=True, host='127.0.0.1', port=5000)
