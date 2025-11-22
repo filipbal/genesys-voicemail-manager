@@ -1,61 +1,65 @@
-# Voicemail Manager - Performance & Rate Limiting Fixes (v2)
+# Voicemail Manager - Performance & Rate Limiting Fixes (v3)
 
-## Issues Fixed
+## Issue Analysis
 
-### 1. Rate Limiting on Bulk Operations (HTTP 429 Error)
-**Problem:** Forwarding/deleting voicemails hit API rate limits after ~50 operations, even with batching.
+### v1-v2: Rate Limiting Assumption (WRONG)
+We initially assumed the errors were caused by Genesys API rate limits. This was incorrect.
 
-**Root Cause:** Genesys has a rolling ~50 request limit that resets over time, not just a per-batch limit.
-
-**Solution:** Implemented aggressive two-tier batching with longer delays:
-- **Smaller batches:** `BATCH_SIZE = 15` (well under the 50 limit)
-- **Longer delays:** `BATCH_DELAY = 10.0s` between batches
-- **Super batches:** After every 3 batches, take a 30-second break
-- **Emergency backoff:** If 3+ consecutive failures detected, wait 60 seconds
-- **Automatic retry:** Up to 5 retries on 429 with 30s backoff
-
-### 2. Stale Count After Deletion
-**Problem:** After deleting a voicemail, the total count wasn't updating.
-
-**Solution:** 
-- Added `invalidate_voicemail_cache()` function called after all modifications
-- Dashboard now shows refresh parameter `?refresh=1` in back links
-- Cache TTL set to 60 seconds for auto-refresh
-
-### 3. Improved Error Detection
-**New:** The batch processor now detects rate limiting patterns:
-- Tracks consecutive failures
-- If 3+ failures in a row, triggers emergency delay
-- Reports `rate_limited: true` in results if rate limiting was detected
-
-## Configuration Parameters (v2)
-
-```python
-# Rate Limiting and Batch Configuration - CONSERVATIVE
-API_PAGE_SIZE = 100        # Genesys API max page size
-DISPLAY_PAGE_SIZE = 50     # Items per page in UI
-
-BATCH_SIZE = 15            # Operations per batch (keep well under 50)
-BATCH_DELAY = 10.0         # Seconds between batches
-OPERATION_DELAY = 0.5      # Seconds between operations
-RATE_LIMIT_BACKOFF = 30.0  # Default backoff on 429
-MAX_RETRIES = 5            # Max retries per request
-
-# Super batch - prevents hitting rolling rate limits
-SUPER_BATCH_SIZE = 3       # Number of batches before long break
-SUPER_BATCH_DELAY = 30.0   # Seconds for super batch break
-
-CACHE_TTL = 60             # Cache validity in seconds
+### v3: Actual Issue - Gunicorn Worker Timeout
+The real problem from the logs:
+```
+[CRITICAL] WORKER TIMEOUT (pid:57)
 ```
 
-## Time Estimates
+Gunicorn's default worker timeout is **30 seconds**. Our batch processing with delays exceeded this, causing the worker to be killed mid-operation.
 
-With these settings, operations will take approximately:
-- **50 voicemails:** ~1 minute
-- **100 voicemails:** ~2-3 minutes
-- **500 voicemails:** ~15-20 minutes
+## Solution (v3)
 
-The UI now shows more realistic progress estimates.
+### 1. Gunicorn Configuration (`gunicorn.conf.py`)
+```python
+timeout = 600  # 10 minutes (was 30 seconds)
+graceful_timeout = 120
+workers = 2
+```
+
+### 2. Updated `render.yaml`
+```yaml
+startCommand: gunicorn --config gunicorn.conf.py app:app
+```
+
+### 3. Rebalanced Batch Settings
+Now that we have proper timeout, we can use faster settings:
+
+| Setting | v2 (Too Slow) | v3 (Balanced) |
+|---------|---------------|---------------|
+| BATCH_SIZE | 15 | **20** |
+| BATCH_DELAY | 10s | **3s** |
+| OPERATION_DELAY | 0.5s | **0.2s** |
+| SUPER_BATCH_SIZE | 3 | **5** |
+| SUPER_BATCH_DELAY | 30s | **10s** |
+
+## Time Estimates (v3)
+
+- **50 voicemails:** ~15-20 seconds
+- **100 voicemails:** ~30-40 seconds  
+- **500 voicemails:** ~3-4 minutes
+
+## Files Changed
+
+1. **NEW: `gunicorn.conf.py`** - Gunicorn configuration with 10-minute timeout
+2. **UPDATED: `render.yaml`** - Uses gunicorn config file
+3. **UPDATED: `app.py`** - Rebalanced batch settings
+4. **UPDATED: `templates/forward.html`** - Updated progress estimates
+5. **UPDATED: `templates/delete.html`** - Updated progress estimates
+
+## Deployment Instructions
+
+1. Add `gunicorn.conf.py` to your project root
+2. Update `render.yaml` with new startCommand
+3. Replace `app.py` and templates
+4. Redeploy on Render
+
+The service will automatically restart with the new 10-minute timeout, allowing batch operations to complete successfully.
 
 ## Updated Files
 

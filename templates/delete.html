@@ -41,8 +41,8 @@
     <div class="d-flex align-items-center">
         <i class="bi bi-info-circle-fill me-3 fs-4"></i>
         <div>
-            <strong>Batch Processing:</strong> Voicemails are deleted in small batches of {{ batch_size }} with delays between batches to avoid API rate limits.
-            <br><small class="text-muted">Large operations (100+ items) may take 5-10 minutes. Please keep this window open and wait for completion.</small>
+            <strong>Batch Processing:</strong> Voicemails are deleted in batches of {{ batch_size }} to avoid API rate limits.
+            <br><small class="text-muted">Operations typically complete in 1-2 minutes for 50-100 items. Please keep this window open.</small>
         </div>
     </div>
 </div>
@@ -330,16 +330,16 @@ function executeDelete() {
     const progressModal = new bootstrap.Modal(document.getElementById('progressModal'));
     progressModal.show();
     
-    // Simulate progress - adjusted for longer operation times
-    // With BATCH_SIZE=15, BATCH_DELAY=10s, SUPER_BATCH_DELAY=30s
-    // Estimate: ~15 items per batch, ~12s per batch average, super break every 3 batches
+    // Simulate progress - adjusted for gunicorn timeout fix
+    // With BATCH_SIZE=20, BATCH_DELAY=3s, SUPER_BATCH_DELAY=10s
+    // Estimate: ~20 items per batch, ~5s per batch average, super break every 5 batches
     const batches = Math.ceil(selectedVoicemails.length / BATCH_SIZE);
-    const superBatches = Math.floor(batches / 3);
-    const estimatedSeconds = (batches * 12) + (superBatches * 30);
+    const superBatches = Math.floor(batches / 5);
+    const estimatedSeconds = (batches * 5) + (superBatches * 10);
     
     let progress = 0;
     const progressInterval = setInterval(() => {
-        // Slower progress that accounts for actual operation time
+        // Progress that accounts for actual operation time
         progress += (100 / Math.max(estimatedSeconds, 10)) * 0.5;
         if (progress > 95) progress = 95; // Don't go past 95% until complete
         document.getElementById('progressBar').style.width = progress + '%';

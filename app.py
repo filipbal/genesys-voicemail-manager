@@ -78,21 +78,22 @@ os.makedirs(TEMP_DIR, exist_ok=True)
 # RATE LIMITING AND BATCH CONFIGURATION
 # ============================================================================
 
-# Genesys API limits - conservative settings to avoid 429 errors
-API_PAGE_SIZE = 100  # Genesys API max is typically 100
+# Genesys API limits - balanced settings
+API_PAGE_SIZE = 100  # Genesys API max page size
 DISPLAY_PAGE_SIZE = 50  # Number of voicemails to display per page in UI
 
-# Batch processing settings - VERY CONSERVATIVE due to Genesys hard limits
-# Genesys appears to have a rolling ~50 request limit per minute
-BATCH_SIZE = 15  # Number of operations per batch (keep well under 50)
-BATCH_DELAY = 10.0  # Seconds to wait between batches (allow rate limit to reset)
-OPERATION_DELAY = 0.5  # Seconds between individual operations within a batch
-RATE_LIMIT_BACKOFF = 30.0  # Seconds to wait after rate limit hit (longer backoff)
+# Batch processing settings
+# Note: Gunicorn timeout is set to 600s in gunicorn.conf.py
+# These settings balance speed with API rate limit safety
+BATCH_SIZE = 20  # Number of operations per batch
+BATCH_DELAY = 3.0  # Seconds to wait between batches
+OPERATION_DELAY = 0.2  # Seconds between individual operations within a batch
+RATE_LIMIT_BACKOFF = 10.0  # Seconds to wait after rate limit hit
 MAX_RETRIES = 5  # Max retries for rate-limited requests
 
-# Super batch - after every N batches, take a longer break
-SUPER_BATCH_SIZE = 3  # Number of batches before taking a longer break
-SUPER_BATCH_DELAY = 30.0  # Seconds to wait after super batch (let rate limit fully reset)
+# Super batch - after every N batches, take a longer break to prevent rate limits
+SUPER_BATCH_SIZE = 5  # Number of batches before taking a longer break
+SUPER_BATCH_DELAY = 10.0  # Seconds to wait after super batch
 
 # Cache settings (in-memory, per session)
 CACHE_TTL = 60  # Seconds to cache voicemail data
