@@ -36,12 +36,24 @@
     </div>
 </div>
 
+<!-- Batch Processing Info -->
+<div class="alert alert-info mb-4">
+    <div class="d-flex align-items-center">
+        <i class="bi bi-info-circle-fill me-3 fs-4"></i>
+        <div>
+            <strong>Batch Processing:</strong> Voicemails are deleted in batches of {{ batch_size }} to avoid API rate limits.
+            Large operations may take several minutes. Please wait for the operation to complete.
+        </div>
+    </div>
+</div>
+
 <!-- Voicemail Selection -->
 <div class="card mb-4">
     <div class="card-header d-flex justify-content-between align-items-center bg-danger text-white">
         <h5 class="mb-0">
             <i class="bi bi-list-check me-2"></i>
             Select Voicemails to Delete
+            <small class="ms-2">({{ voicemail_count }} total)</small>
         </h5>
         <div>
             <button class="btn btn-outline-light btn-sm me-2" onclick="selectAll()">
@@ -54,9 +66,9 @@
     </div>
     <div class="card-body p-0">
         {% if voicemails %}
-        <div class="table-responsive">
+        <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
             <table class="table table-hover mb-0">
-                <thead class="table-light">
+                <thead class="table-light sticky-top">
                     <tr>
                         <th scope="col" style="width: 40px;">
                             <input type="checkbox" class="form-check-input" id="selectAllCheckbox" 
@@ -110,6 +122,9 @@
         <div class="d-flex justify-content-between align-items-center">
             <div>
                 <span id="selectedCount" class="text-muted">0 voicemails selected</span>
+                <span id="batchInfo" class="text-muted ms-2" style="display: none;">
+                    (will process in <span id="batchCount">0</span> batches)
+                </span>
             </div>
             <button type="button" class="btn btn-danger btn-lg" id="deleteBtn" onclick="confirmDelete()" disabled>
                 <span class="btn-text">
@@ -144,6 +159,10 @@
                     Are you sure you want to permanently delete 
                     <strong id="deleteCountText">0</strong> voicemail(s)?
                 </p>
+                <p class="text-center text-muted" id="batchWarning" style="display: none;">
+                    <i class="bi bi-clock me-1"></i>
+                    This will be processed in <strong id="confirmBatchCount">0</strong> batches and may take several minutes.
+                </p>
                 <div class="alert alert-danger">
                     <i class="bi bi-exclamation-triangle me-2"></i>
                     <strong>This action cannot be undone!</strong><br>
@@ -160,11 +179,45 @@
     </div>
 </div>
 
+<!-- Progress Modal -->
+<div class="modal fade" id="progressModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title">
+                    <i class="bi bi-trash me-2"></i>
+                    Deleting Voicemails
+                </h5>
+            </div>
+            <div class="modal-body">
+                <div class="text-center mb-3">
+                    <div class="spinner-border text-danger" role="status" style="width: 3rem; height: 3rem;">
+                        <span class="visually-hidden">Processing...</span>
+                    </div>
+                </div>
+                <p class="text-center mb-2">
+                    Deleting <strong id="progressTotal">0</strong> voicemails in batches...
+                </p>
+                <div class="progress mb-3" style="height: 25px;">
+                    <div class="progress-bar bg-danger progress-bar-striped progress-bar-animated" 
+                         role="progressbar" style="width: 0%;" id="progressBar">
+                        0%
+                    </div>
+                </div>
+                <p class="text-center text-muted small mb-0">
+                    <i class="bi bi-info-circle me-1"></i>
+                    Please wait. This may take several minutes for large batches.
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Results Modal -->
 <div class="modal fade" id="resultsModal" tabindex="-1" data-bs-backdrop="static">
     <div class="modal-dialog">
         <div class="modal-content">
-            <div class="modal-header">
+            <div class="modal-header" id="resultsHeader">
                 <h5 class="modal-title" id="resultsTitle">
                     <i class="bi bi-check-circle text-success me-2"></i>
                     Deletion Complete
@@ -174,7 +227,7 @@
                 <!-- Results will be populated here -->
             </div>
             <div class="modal-footer">
-                <a href="{{ url_for('dashboard') }}" class="btn btn-primary">
+                <a href="{{ url_for('dashboard') }}?refresh=1" class="btn btn-primary">
                     <i class="bi bi-arrow-left me-1"></i> Back to Dashboard
                 </a>
             </div>
@@ -185,6 +238,7 @@
 
 {% block extra_js %}
 <script>
+const BATCH_SIZE = {{ batch_size }};
 let selectedVoicemails = [];
 
 // Voicemail selection handlers
@@ -220,6 +274,18 @@ function updateSelectedCount() {
     document.getElementById('selectedCount').textContent = `${count} voicemail${count !== 1 ? 's' : ''} selected`;
     document.getElementById('deleteBtn').disabled = count === 0;
     
+    // Show batch info for large selections
+    const batchInfo = document.getElementById('batchInfo');
+    const batchCount = document.getElementById('batchCount');
+    
+    if (count > BATCH_SIZE) {
+        const batches = Math.ceil(count / BATCH_SIZE);
+        batchCount.textContent = batches;
+        batchInfo.style.display = 'inline';
+    } else {
+        batchInfo.style.display = 'none';
+    }
+    
     // Update list of selected voicemails
     selectedVoicemails = Array.from(document.querySelectorAll('.voicemail-checkbox:checked'))
         .map(cb => cb.value);
@@ -234,6 +300,18 @@ function confirmDelete() {
     
     document.getElementById('deleteCountText').textContent = count;
     
+    // Show batch warning for large deletions
+    const batchWarning = document.getElementById('batchWarning');
+    const confirmBatchCount = document.getElementById('confirmBatchCount');
+    
+    if (count > BATCH_SIZE) {
+        const batches = Math.ceil(count / BATCH_SIZE);
+        confirmBatchCount.textContent = batches;
+        batchWarning.style.display = 'block';
+    } else {
+        batchWarning.style.display = 'none';
+    }
+    
     const modal = new bootstrap.Modal(document.getElementById('confirmDeleteModal'));
     modal.show();
 }
@@ -241,7 +319,28 @@ function confirmDelete() {
 function executeDelete() {
     if (selectedVoicemails.length === 0) return;
     
-    // Show loading state
+    // Hide confirm modal
+    bootstrap.Modal.getInstance(document.getElementById('confirmDeleteModal')).hide();
+    
+    // Show progress modal
+    document.getElementById('progressTotal').textContent = selectedVoicemails.length;
+    document.getElementById('progressBar').style.width = '0%';
+    document.getElementById('progressBar').textContent = '0%';
+    
+    const progressModal = new bootstrap.Modal(document.getElementById('progressModal'));
+    progressModal.show();
+    
+    // Simulate progress
+    const estimatedTime = Math.ceil(selectedVoicemails.length / BATCH_SIZE) * 3;
+    let progress = 0;
+    const progressInterval = setInterval(() => {
+        progress += 2;
+        if (progress > 90) progress = 90;
+        document.getElementById('progressBar').style.width = progress + '%';
+        document.getElementById('progressBar').textContent = progress + '%';
+    }, estimatedTime * 20);
+    
+    // Show loading state on button
     const btn = document.getElementById('finalDeleteBtn');
     btn.disabled = true;
     btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Deleting...';
@@ -257,32 +356,45 @@ function executeDelete() {
     })
     .then(response => response.json())
     .then(data => {
-        // Close confirm modal
-        bootstrap.Modal.getInstance(document.getElementById('confirmDeleteModal')).hide();
+        // Stop progress simulation
+        clearInterval(progressInterval);
+        document.getElementById('progressBar').style.width = '100%';
+        document.getElementById('progressBar').textContent = '100%';
         
-        // Reset button
-        btn.disabled = false;
-        btn.innerHTML = '<i class="bi bi-trash me-1"></i> Yes, Delete Forever';
-        
-        // Show results
-        showResults(data);
+        // Hide progress modal after a short delay
+        setTimeout(() => {
+            progressModal.hide();
+            
+            // Reset button
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-trash me-1"></i> Yes, Delete Forever';
+            
+            // Show results
+            showResults(data);
+        }, 500);
     })
     .catch(error => {
         console.error('Delete error:', error);
+        clearInterval(progressInterval);
+        progressModal.hide();
+        
         btn.disabled = false;
         btn.innerHTML = '<i class="bi bi-trash me-1"></i> Yes, Delete Forever';
-        alert('An error occurred while deleting voicemails');
+        
+        alert('An error occurred while deleting voicemails. Please try again.');
     });
 }
 
 function showResults(data) {
     const resultsBody = document.getElementById('resultsBody');
+    const resultsHeader = document.getElementById('resultsHeader');
     const resultsTitle = document.getElementById('resultsTitle');
     
     let html = '';
     
     if (data.success) {
-        resultsTitle.innerHTML = '<i class="bi bi-check-circle text-success me-2"></i>Deletion Complete';
+        resultsHeader.className = 'modal-header bg-success text-white';
+        resultsTitle.innerHTML = '<i class="bi bi-check-circle me-2"></i>Deletion Complete';
         html = `
             <div class="text-center mb-3">
                 <i class="bi bi-check-circle text-success" style="font-size: 4rem;"></i>
@@ -292,13 +404,14 @@ function showResults(data) {
             </p>
         `;
     } else {
-        resultsTitle.innerHTML = '<i class="bi bi-exclamation-triangle text-warning me-2"></i>Deletion Partial';
+        resultsHeader.className = 'modal-header bg-warning';
+        resultsTitle.innerHTML = '<i class="bi bi-exclamation-triangle me-2"></i>Partial Success';
         html = `
             <div class="text-center mb-3">
                 <i class="bi bi-exclamation-triangle text-warning" style="font-size: 4rem;"></i>
             </div>
             <p class="text-center">
-                Deleted <strong>${data.deleted}</strong> voicemail${data.deleted !== 1 ? 's' : ''}.
+                Deleted <strong>${data.deleted}</strong> of <strong>${data.total}</strong> voicemail${data.total !== 1 ? 's' : ''}.
                 <br>
                 <span class="text-danger">Failed: ${data.failed}</span>
             </p>
@@ -308,9 +421,10 @@ function showResults(data) {
             html += `
                 <div class="alert alert-danger mt-3">
                     <strong>Errors:</strong>
-                    <ul class="mb-0 mt-2">
+                    <ul class="mb-0 mt-2" style="max-height: 150px; overflow-y: auto;">
                         ${data.errors.map(e => `<li><small>${e}</small></li>`).join('')}
                     </ul>
+                    ${data.errors.length >= 10 ? '<small class="text-muted">Showing first 10 errors...</small>' : ''}
                 </div>
             `;
         }

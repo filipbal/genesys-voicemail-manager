@@ -25,6 +25,17 @@
     </div>
 </div>
 
+<!-- Batch Processing Info -->
+<div class="alert alert-info mb-4">
+    <div class="d-flex align-items-center">
+        <i class="bi bi-info-circle-fill me-3 fs-4"></i>
+        <div>
+            <strong>Batch Processing:</strong> Voicemails are forwarded in batches of {{ batch_size }} to avoid API rate limits.
+            Large operations may take several minutes. Please wait for the operation to complete.
+        </div>
+    </div>
+</div>
+
 <!-- Forward Form -->
 <div class="card mb-4">
     <div class="card-header">
@@ -88,6 +99,7 @@
         <h5 class="mb-0">
             <i class="bi bi-list-check me-2"></i>
             Step 2: Select Voicemails to Forward
+            <small class="text-muted ms-2">({{ voicemail_count }} total)</small>
         </h5>
         <div>
             <button class="btn btn-outline-secondary btn-sm me-2" onclick="selectAll()">
@@ -100,9 +112,9 @@
     </div>
     <div class="card-body p-0">
         {% if voicemails %}
-        <div class="table-responsive">
+        <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
             <table class="table table-hover mb-0">
-                <thead class="table-light">
+                <thead class="table-light sticky-top">
                     <tr>
                         <th scope="col" style="width: 40px;">
                             <input type="checkbox" class="form-check-input" id="selectAllCheckbox" 
@@ -156,6 +168,9 @@
         <div class="d-flex justify-content-between align-items-center">
             <div>
                 <span id="selectedCount" class="text-muted">0 voicemails selected</span>
+                <span id="batchInfo" class="text-muted ms-2" style="display: none;">
+                    (will process in <span id="batchCount">0</span> batches)
+                </span>
             </div>
             <button type="button" class="btn btn-genesys btn-lg" id="forwardBtn" onclick="forwardVoicemails()" disabled>
                 <span class="btn-text">
@@ -171,12 +186,46 @@
     </div>
 </div>
 
+<!-- Progress Modal -->
+<div class="modal fade" id="progressModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    <i class="bi bi-forward me-2"></i>
+                    Forwarding Voicemails
+                </h5>
+            </div>
+            <div class="modal-body">
+                <div class="text-center mb-3">
+                    <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
+                        <span class="visually-hidden">Processing...</span>
+                    </div>
+                </div>
+                <p class="text-center mb-2">
+                    Processing <strong id="progressTotal">0</strong> voicemails in batches...
+                </p>
+                <div class="progress mb-3" style="height: 25px;">
+                    <div class="progress-bar progress-bar-striped progress-bar-animated" 
+                         role="progressbar" style="width: 0%;" id="progressBar">
+                        0%
+                    </div>
+                </div>
+                <p class="text-center text-muted small mb-0">
+                    <i class="bi bi-info-circle me-1"></i>
+                    Please wait. This may take several minutes for large batches.
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Results Modal -->
 <div class="modal fade" id="resultsModal" tabindex="-1">
     <div class="modal-dialog">
         <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">
+            <div class="modal-header" id="resultsHeader">
+                <h5 class="modal-title" id="resultsTitle">
                     <i class="bi bi-check-circle text-success me-2"></i>
                     Forward Complete
                 </h5>
@@ -186,6 +235,7 @@
                 <!-- Results will be populated here -->
             </div>
             <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
                 <a href="{{ url_for('dashboard') }}" class="btn btn-primary">
                     <i class="bi bi-arrow-left me-1"></i> Back to Dashboard
                 </a>
@@ -197,6 +247,7 @@
 
 {% block extra_js %}
 <script>
+const BATCH_SIZE = {{ batch_size }};
 let searchTimeout = null;
 let selectedTarget = null;
 
@@ -349,6 +400,19 @@ function selectNone() {
 function updateSelectedCount() {
     const count = document.querySelectorAll('.voicemail-checkbox:checked').length;
     document.getElementById('selectedCount').textContent = `${count} voicemail${count !== 1 ? 's' : ''} selected`;
+    
+    // Show batch info for large selections
+    const batchInfo = document.getElementById('batchInfo');
+    const batchCount = document.getElementById('batchCount');
+    
+    if (count > BATCH_SIZE) {
+        const batches = Math.ceil(count / BATCH_SIZE);
+        batchCount.textContent = batches;
+        batchInfo.style.display = 'inline';
+    } else {
+        batchInfo.style.display = 'none';
+    }
+    
     updateForwardButton();
 }
 
@@ -372,7 +436,25 @@ function forwardVoicemails() {
         return;
     }
     
-    // Show loading state
+    // Show progress modal
+    document.getElementById('progressTotal').textContent = voicemailIds.length;
+    document.getElementById('progressBar').style.width = '0%';
+    document.getElementById('progressBar').textContent = '0%';
+    
+    const progressModal = new bootstrap.Modal(document.getElementById('progressModal'));
+    progressModal.show();
+    
+    // Simulate progress (since we can't get real-time updates from the server)
+    const estimatedTime = Math.ceil(voicemailIds.length / BATCH_SIZE) * 3; // ~3 seconds per batch
+    let progress = 0;
+    const progressInterval = setInterval(() => {
+        progress += 2;
+        if (progress > 90) progress = 90; // Don't go past 90% until complete
+        document.getElementById('progressBar').style.width = progress + '%';
+        document.getElementById('progressBar').textContent = progress + '%';
+    }, estimatedTime * 20);
+    
+    // Show loading state on button
     const btn = document.getElementById('forwardBtn');
     btn.querySelector('.btn-text').style.display = 'none';
     btn.querySelector('.loading-spinner').style.display = 'inline-block';
@@ -391,29 +473,47 @@ function forwardVoicemails() {
     })
     .then(response => response.json())
     .then(data => {
-        // Reset button
+        // Stop progress simulation
+        clearInterval(progressInterval);
+        document.getElementById('progressBar').style.width = '100%';
+        document.getElementById('progressBar').textContent = '100%';
+        
+        // Hide progress modal after a short delay
+        setTimeout(() => {
+            progressModal.hide();
+            
+            // Reset button
+            btn.querySelector('.btn-text').style.display = 'inline-block';
+            btn.querySelector('.loading-spinner').style.display = 'none';
+            btn.disabled = false;
+            
+            // Show results
+            showResults(data);
+        }, 500);
+    })
+    .catch(error => {
+        console.error('Forward error:', error);
+        clearInterval(progressInterval);
+        progressModal.hide();
+        
         btn.querySelector('.btn-text').style.display = 'inline-block';
         btn.querySelector('.loading-spinner').style.display = 'none';
         btn.disabled = false;
         
-        // Show results
-        showResults(data);
-    })
-    .catch(error => {
-        console.error('Forward error:', error);
-        btn.querySelector('.btn-text').style.display = 'inline-block';
-        btn.querySelector('.loading-spinner').style.display = 'none';
-        btn.disabled = false;
-        alert('An error occurred while forwarding voicemails');
+        alert('An error occurred while forwarding voicemails. Please try again.');
     });
 }
 
 function showResults(data) {
     const resultsBody = document.getElementById('resultsBody');
+    const resultsHeader = document.getElementById('resultsHeader');
+    const resultsTitle = document.getElementById('resultsTitle');
     
     let html = '';
     
     if (data.success) {
+        resultsHeader.className = 'modal-header bg-success text-white';
+        resultsTitle.innerHTML = '<i class="bi bi-check-circle me-2"></i>Forward Complete';
         html = `
             <div class="text-center mb-3">
                 <i class="bi bi-check-circle text-success" style="font-size: 4rem;"></i>
@@ -424,12 +524,14 @@ function showResults(data) {
             </p>
         `;
     } else {
+        resultsHeader.className = 'modal-header bg-warning';
+        resultsTitle.innerHTML = '<i class="bi bi-exclamation-triangle me-2"></i>Partial Success';
         html = `
             <div class="text-center mb-3">
                 <i class="bi bi-exclamation-triangle text-warning" style="font-size: 4rem;"></i>
             </div>
             <p class="text-center">
-                Forwarded <strong>${data.forwarded}</strong> voicemail${data.forwarded !== 1 ? 's' : ''}.
+                Forwarded <strong>${data.forwarded}</strong> of <strong>${data.total}</strong> voicemail${data.total !== 1 ? 's' : ''}.
                 <br>
                 <span class="text-danger">Failed: ${data.failed}</span>
             </p>
@@ -439,9 +541,10 @@ function showResults(data) {
             html += `
                 <div class="alert alert-danger mt-3">
                     <strong>Errors:</strong>
-                    <ul class="mb-0 mt-2">
+                    <ul class="mb-0 mt-2" style="max-height: 150px; overflow-y: auto;">
                         ${data.errors.map(e => `<li><small>${e}</small></li>`).join('')}
                     </ul>
+                    ${data.errors.length >= 10 ? '<small class="text-muted">Showing first 10 errors...</small>' : ''}
                 </div>
             `;
         }
