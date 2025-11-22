@@ -261,22 +261,30 @@ def search_users(access_token, region_host, query):
 
 
 def search_groups(access_token, region_host, query):
-    """Search for groups by name using GET endpoint"""
-    url = f"https://api.{region_host}/api/v2/groups"
-    params = {
-        'pageSize': 25,
-        'pageNumber': 1,
-        'name': f"*{query}*"
-    }
-    url_with_params = f"{url}?{urllib.parse.urlencode(params)}"
+    """Search for groups by name using POST search endpoint"""
+    url = f"https://api.{region_host}/api/v2/groups/search"
     
-    req = urllib.request.Request(url_with_params)
+    search_body = {
+        "pageSize": 25,
+        "pageNumber": 1,
+        "query": [
+            {
+                "type": "STARTS_WITH",
+                "fields": ["name"],
+                "value": query
+            }
+        ]
+    }
+    
+    data = json.dumps(search_body).encode()
+    req = urllib.request.Request(url, data=data, method='POST')
     req.add_header('Authorization', f'Bearer {access_token}')
+    req.add_header('Content-Type', 'application/json')
     
     try:
         with urllib.request.urlopen(req, timeout=30) as response:
             result = json.loads(response.read().decode())
-            return result.get('entities', []), None
+            return result.get('results', []), None
     except urllib.request.HTTPError as e:
         try:
             error_body = e.read().decode()
