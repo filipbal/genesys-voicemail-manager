@@ -23,9 +23,29 @@
         
         <!-- Login Card -->
         <div class="card shadow-sm mb-4">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    <i class="bi bi-box-arrow-in-right me-2"></i>
+                    Login with Genesys Cloud
+                </h5>
+            </div>
             <div class="card-body p-4">
                 <form method="POST" action="{{ url_for('login') }}" id="loginForm">
-                    <input type="hidden" name="region" value="usw2.pure.cloud">
+                    <div class="mb-4">
+                        <label for="region" class="form-label">
+                            <i class="bi bi-globe me-1"></i>
+                            Select your Genesys Cloud region:
+                        </label>
+                        <select class="form-select form-select-lg" name="region" id="region" required>
+                            <option value="" disabled selected>-- Select Region --</option>
+                            {% for key, region in regions.items() %}
+                            <option value="{{ key }}">{{ region.name }} ({{ region.host }})</option>
+                            {% endfor %}
+                        </select>
+                        <div class="form-text">
+                            Choose the region where your Genesys Cloud organization is hosted.
+                        </div>
+                    </div>
                     
                     <div class="d-grid">
                         <button type="submit" class="btn btn-danger btn-lg" id="loginBtn">
@@ -33,10 +53,6 @@
                             Login with Genesys Cloud
                         </button>
                     </div>
-                    
-                    <p class="text-muted text-center mt-3 mb-0 small">
-                        <i class="bi bi-geo-alt me-1"></i> US West Region (usw2.pure.cloud)
-                    </p>
                 </form>
             </div>
         </div>
