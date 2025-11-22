@@ -283,7 +283,7 @@ def get_all_voicemails_paginated(access_token, region_host, max_pages=None, prog
         max_pages: Optional limit on number of pages to fetch (None = all pages)
         progress_callback: Optional callback(current_page, total_pages) for progress
     
-    Returns: (list of all voicemails, total_active_count, error)
+    Returns: (list of all voicemails sorted by date descending, total_active_count, error)
     """
     all_messages = []
     page_number = 1
@@ -315,6 +315,9 @@ def get_all_voicemails_paginated(access_token, region_host, max_pages=None, prog
         
         # Small delay between pages to avoid rate limiting
         time.sleep(0.1)
+    
+    # Sort by createdDate descending (newest first)
+    all_messages.sort(key=lambda vm: vm.get('createdDate', '') or '', reverse=True)
     
     return all_messages, len(all_messages), None
 
@@ -911,7 +914,7 @@ def download_single(message_id):
 @app.route('/download-all')
 @login_required
 def download_all():
-    """Download all voicemails as a ZIP file"""
+    """Download all voicemails as a ZIP file with batch processing"""
     access_token = session.get('access_token')
     region_host = session.get('region_host')
     user_info = session.get('user_info', {})
@@ -930,24 +933,52 @@ def download_all():
     
     downloaded = 0
     errors = []
+    total_items = len(all_voicemails)
+    batches_since_super_break = 0
     
-    for vm in all_voicemails:
-        msg_id = vm.get('id')
-        filename = format_filename(vm)
+    app.logger.info(f"Starting download of {total_items} voicemails")
+    
+    # Process downloads in batches
+    for batch_start in range(0, total_items, BATCH_SIZE):
+        batch_end = min(batch_start + BATCH_SIZE, total_items)
+        batch = all_voicemails[batch_start:batch_end]
+        batch_num = (batch_start // BATCH_SIZE) + 1
+        total_batches = (total_items + BATCH_SIZE - 1) // BATCH_SIZE
         
-        media_bytes, error = download_voicemail_media(access_token, region_host, msg_id)
+        app.logger.info(f"Downloading batch {batch_num}/{total_batches} ({len(batch)} files)")
         
-        if error:
-            errors.append(f"{filename}: {error}")
-            continue
+        # Check if we need a super batch break BEFORE processing
+        if batches_since_super_break >= SUPER_BATCH_SIZE and batch_num > 1:
+            app.logger.info(f"Super batch break: waiting {SUPER_BATCH_DELAY}s...")
+            time.sleep(SUPER_BATCH_DELAY)
+            batches_since_super_break = 0
         
-        filepath = os.path.join(export_dir, filename)
-        with open(filepath, 'wb') as f:
-            f.write(media_bytes)
-        downloaded += 1
+        for idx, vm in enumerate(batch):
+            msg_id = vm.get('id')
+            filename = format_filename(vm)
+            
+            media_bytes, dl_error = download_voicemail_media(access_token, region_host, msg_id)
+            
+            if dl_error:
+                errors.append(f"{filename}: {dl_error}")
+            else:
+                filepath = os.path.join(export_dir, filename)
+                with open(filepath, 'wb') as f:
+                    f.write(media_bytes)
+                downloaded += 1
+            
+            # Delay between operations within batch
+            if idx < len(batch) - 1:
+                time.sleep(OPERATION_DELAY)
         
-        # Small delay to avoid rate limiting
-        time.sleep(0.2)
+        batches_since_super_break += 1
+        
+        # Regular delay between batches
+        if batch_end < total_items:
+            app.logger.info(f"Batch {batch_num} complete. Waiting {BATCH_DELAY}s...")
+            time.sleep(BATCH_DELAY)
+    
+    app.logger.info(f"Download complete: {downloaded}/{total_items} files")
     
     metadata_file = os.path.join(export_dir, 'metadata.json')
     with open(metadata_file, 'w', encoding='utf-8') as f:

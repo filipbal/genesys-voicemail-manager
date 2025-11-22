@@ -1,65 +1,62 @@
-# Voicemail Manager - Performance & Rate Limiting Fixes (v3)
+# Voicemail Manager - Performance & Rate Limiting Fixes (v4)
 
-## Issue Analysis
+## v4 Changes
 
-### v1-v2: Rate Limiting Assumption (WRONG)
-We initially assumed the errors were caused by Genesys API rate limits. This was incorrect.
+### 1. Batch Processing for Download All
+The "Download All" function now uses the same batch processing system as forward/delete:
+- Downloads in batches of 20 files
+- 3-second delay between batches
+- Super batch break every 5 batches
+- Proper logging of progress
 
-### v3: Actual Issue - Gunicorn Worker Timeout
-The real problem from the logs:
-```
-[CRITICAL] WORKER TIMEOUT (pid:57)
-```
+### 2. Sorting - Newest First
+All voicemail lists are now sorted by date descending (newest first):
+- Dashboard
+- Forward page
+- Delete page
+- Download All (files in ZIP)
 
-Gunicorn's default worker timeout is **30 seconds**. Our batch processing with delays exceeded this, causing the worker to be killed mid-operation.
+The sorting is applied in `get_all_voicemails_paginated()` so it affects all views consistently.
 
-## Solution (v3)
+---
 
-### 1. Gunicorn Configuration (`gunicorn.conf.py`)
+## v3 Changes (Previous)
+
+### Root Cause: Gunicorn Worker Timeout
+The errors were caused by Gunicorn's default 30-second worker timeout, not API rate limits.
+
+### Solution
+1. **`gunicorn.conf.py`** - Sets timeout to 600s (10 minutes)
+2. **`render.yaml`** - Uses `gunicorn --config gunicorn.conf.py app:app`
+
+---
+
+## Current Configuration (v4)
+
 ```python
-timeout = 600  # 10 minutes (was 30 seconds)
-graceful_timeout = 120
-workers = 2
+BATCH_SIZE = 20            # Operations per batch
+BATCH_DELAY = 3.0          # Seconds between batches
+OPERATION_DELAY = 0.2      # Seconds between operations
+SUPER_BATCH_SIZE = 5       # Batches before long break
+SUPER_BATCH_DELAY = 10.0   # Seconds for super batch break
 ```
 
-### 2. Updated `render.yaml`
-```yaml
-startCommand: gunicorn --config gunicorn.conf.py app:app
-```
+## Time Estimates
 
-### 3. Rebalanced Batch Settings
-Now that we have proper timeout, we can use faster settings:
+| Operation | 50 items | 100 items | 500 items |
+|-----------|----------|-----------|-----------|
+| Forward | ~15s | ~30s | ~3 min |
+| Delete | ~15s | ~30s | ~3 min |
+| Download All | ~20s | ~45s | ~4 min |
 
-| Setting | v2 (Too Slow) | v3 (Balanced) |
-|---------|---------------|---------------|
-| BATCH_SIZE | 15 | **20** |
-| BATCH_DELAY | 10s | **3s** |
-| OPERATION_DELAY | 0.5s | **0.2s** |
-| SUPER_BATCH_SIZE | 3 | **5** |
-| SUPER_BATCH_DELAY | 30s | **10s** |
+## Files in v4
 
-## Time Estimates (v3)
-
-- **50 voicemails:** ~15-20 seconds
-- **100 voicemails:** ~30-40 seconds  
-- **500 voicemails:** ~3-4 minutes
-
-## Files Changed
-
-1. **NEW: `gunicorn.conf.py`** - Gunicorn configuration with 10-minute timeout
-2. **UPDATED: `render.yaml`** - Uses gunicorn config file
-3. **UPDATED: `app.py`** - Rebalanced batch settings
-4. **UPDATED: `templates/forward.html`** - Updated progress estimates
-5. **UPDATED: `templates/delete.html`** - Updated progress estimates
-
-## Deployment Instructions
-
-1. Add `gunicorn.conf.py` to your project root
-2. Update `render.yaml` with new startCommand
-3. Replace `app.py` and templates
-4. Redeploy on Render
-
-The service will automatically restart with the new 10-minute timeout, allowing batch operations to complete successfully.
+1. `gunicorn.conf.py` - Gunicorn config (10 min timeout)
+2. `render.yaml` - Updated start command
+3. `app.py` - Batch download + sorting
+4. `templates/forward.html` - Progress UI
+5. `templates/delete.html` - Progress UI
+6. `CHANGELOG.md` - This file
 
 ## Updated Files
 
