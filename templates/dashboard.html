@@ -27,7 +27,7 @@
 
 <!-- Stats Cards -->
 <div class="row mb-4">
-    <div class="col-md-4">
+    <div class="col-md-3">
         <div class="card stats-card">
             <div class="card-body">
                 <div class="d-flex align-items-center">
@@ -36,13 +36,13 @@
                     </div>
                     <div class="flex-grow-1 ms-3">
                         <h2 class="mb-0">{{ voicemail_count }}</h2>
-                        <p class="text-muted mb-0">Total Voicemails</p>
+                        <p class="text-muted mb-0">Voicemails</p>
                     </div>
                 </div>
             </div>
         </div>
     </div>
-    <div class="col-md-4 mt-3 mt-md-0">
+    <div class="col-md-3 mt-3 mt-md-0">
         <div class="card stats-card">
             <div class="card-body">
                 <div class="d-flex align-items-center">
@@ -52,31 +52,43 @@
                     <div class="flex-grow-1 ms-3">
                         {% set total_duration = voicemails|sum(attribute='duration_seconds') %}
                         <h2 class="mb-0">{{ (total_duration / 60)|round(1) }}</h2>
-                        <p class="text-muted mb-0">Total Minutes</p>
+                        <p class="text-muted mb-0">Minutes</p>
                     </div>
                 </div>
             </div>
         </div>
     </div>
-    <div class="col-md-4 mt-3 mt-md-0">
+    <div class="col-md-3 mt-3 mt-md-0">
         <div class="card stats-card">
-            <div class="card-body">
-                <div class="d-flex align-items-center justify-content-center h-100">
-                    {% if voicemail_count > 0 %}
-                    <a href="{{ url_for('download_all') }}" class="btn btn-genesys btn-lg" id="downloadAllBtn">
-                        <span class="btn-text">
-                            <i class="bi bi-download me-2"></i>
-                            Download All as ZIP
-                        </span>
-                        <span class="loading-spinner">
-                            <span class="spinner-border spinner-border-sm me-2"></span>
-                            Preparing ZIP...
-                        </span>
-                    </a>
-                    {% else %}
-                    <span class="text-muted">No voicemails to download</span>
-                    {% endif %}
-                </div>
+            <div class="card-body d-flex align-items-center justify-content-center">
+                {% if voicemail_count > 0 %}
+                <a href="{{ url_for('download_all') }}" class="btn btn-genesys" id="downloadAllBtn">
+                    <span class="btn-text">
+                        <i class="bi bi-download me-2"></i>
+                        Download All
+                    </span>
+                    <span class="loading-spinner">
+                        <span class="spinner-border spinner-border-sm me-2"></span>
+                        Preparing...
+                    </span>
+                </a>
+                {% else %}
+                <span class="text-muted">No voicemails</span>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3 mt-3 mt-md-0">
+        <div class="card stats-card">
+            <div class="card-body d-flex align-items-center justify-content-center">
+                {% if voicemail_count > 0 %}
+                <a href="{{ url_for('forward_page') }}" class="btn btn-outline-primary">
+                    <i class="bi bi-forward me-2"></i>
+                    Forward All
+                </a>
+                {% else %}
+                <span class="text-muted">No voicemails</span>
+                {% endif %}
             </div>
         </div>
     </div>
@@ -105,7 +117,7 @@
                         <th scope="col">Date & Time</th>
                         <th scope="col">Duration</th>
                         <th scope="col">Status</th>
-                        <th scope="col" class="text-center">Action</th>
+                        <th scope="col" class="text-center">Actions</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -134,12 +146,21 @@
                             {% endif %}
                         </td>
                         <td class="text-center">
-                            <a href="{{ url_for('download_single', message_id=vm.id) }}" 
-                               class="btn btn-sm btn-outline-primary download-btn"
-                               title="Download {{ vm.filename }}">
-                                <i class="bi bi-download"></i>
-                                <span class="d-none d-md-inline ms-1">Download</span>
-                            </a>
+                            <div class="btn-group btn-group-sm">
+                                <a href="{{ url_for('download_single', message_id=vm.id) }}" 
+                                   class="btn btn-outline-primary download-btn"
+                                   title="Download">
+                                    <i class="bi bi-download"></i>
+                                </a>
+                                <button type="button" class="btn btn-outline-secondary"
+                                        data-bs-toggle="modal" 
+                                        data-bs-target="#forwardModal"
+                                        data-vm-id="{{ vm.id }}"
+                                        data-vm-caller="{{ vm.caller_name }}"
+                                        title="Forward">
+                                    <i class="bi bi-forward"></i>
+                                </button>
+                            </div>
                         </td>
                     </tr>
                     {% endfor %}
@@ -161,61 +182,272 @@
     <div class="card-header">
         <h5 class="mb-0">
             <i class="bi bi-question-circle me-2"></i>
-            Need Help?
+            Quick Help
         </h5>
     </div>
     <div class="card-body">
         <div class="row">
-            <div class="col-md-6">
-                <h6><i class="bi bi-file-earmark-music me-2"></i>Downloaded File Format</h6>
+            <div class="col-md-4">
+                <h6><i class="bi bi-download me-2 text-primary"></i>Download</h6>
                 <p class="small text-muted mb-3">
-                    Voicemails are downloaded as WAV audio files. The filename includes 
-                    the date, caller name, and message ID for easy identification.
+                    Download voicemails as WAV audio files. Use "Download All" to get a ZIP with all voicemails.
                 </p>
             </div>
-            <div class="col-md-6">
-                <h6><i class="bi bi-file-zip me-2"></i>Download All</h6>
+            <div class="col-md-4">
+                <h6><i class="bi bi-forward me-2 text-primary"></i>Forward</h6>
                 <p class="small text-muted mb-3">
-                    The "Download All" button creates a ZIP file containing all your 
-                    voicemails plus a metadata.json file with message details.
+                    Forward voicemails to another user or group. Use "Forward All" for bulk forwarding.
+                </p>
+            </div>
+            <div class="col-md-4">
+                <h6><i class="bi bi-info-circle me-2 text-primary"></i>Note</h6>
+                <p class="small text-muted mb-3">
+                    You can only access voicemails that belong to your account.
                 </p>
             </div>
         </div>
-        <hr>
-        <p class="small text-muted mb-0">
-            <i class="bi bi-info-circle me-1"></i>
-            <strong>Note:</strong> This tool can only download voicemails that belong to 
-            your account. If you're missing voicemails, they may have been deleted or 
-            belong to a different mailbox.
-        </p>
+    </div>
+</div>
+
+<!-- Forward Single Modal -->
+<div class="modal fade" id="forwardModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    <i class="bi bi-forward me-2"></i>
+                    Forward Voicemail
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p>Forward voicemail from: <strong id="modalCallerName"></strong></p>
+                
+                <!-- Target Type -->
+                <div class="mb-3">
+                    <label class="form-label">Forward to:</label>
+                    <div class="btn-group w-100" role="group">
+                        <input type="radio" class="btn-check" name="modalTargetType" id="modalTargetUser" value="user" checked>
+                        <label class="btn btn-outline-primary" for="modalTargetUser">
+                            <i class="bi bi-person me-1"></i> User
+                        </label>
+                        <input type="radio" class="btn-check" name="modalTargetType" id="modalTargetGroup" value="group">
+                        <label class="btn btn-outline-primary" for="modalTargetGroup">
+                            <i class="bi bi-people me-1"></i> Group
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Search -->
+                <div class="mb-3">
+                    <label for="modalSearchInput" class="form-label">Search:</label>
+                    <input type="text" class="form-control" id="modalSearchInput" 
+                           placeholder="Type to search...">
+                </div>
+
+                <!-- Results -->
+                <div id="modalSearchResults" style="max-height: 200px; overflow-y: auto;">
+                </div>
+
+                <!-- Selected -->
+                <div id="modalSelectedTarget" class="alert alert-success mt-3" style="display: none;">
+                    <i class="bi bi-check-circle me-2"></i>
+                    <strong>Selected:</strong> <span id="modalSelectedName"></span>
+                </div>
+
+                <input type="hidden" id="modalVoicemailId">
+                <input type="hidden" id="modalTargetId">
+                <input type="hidden" id="modalTargetName">
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-genesys" id="modalForwardBtn" onclick="forwardSingle()" disabled>
+                    <i class="bi bi-forward me-1"></i> Forward
+                </button>
+            </div>
+        </div>
     </div>
 </div>
 {% endblock %}
 
 {% block extra_js %}
 <script>
-// Add loading state to download all button
+// Download button loading state
 document.getElementById('downloadAllBtn')?.addEventListener('click', function(e) {
     this.classList.add('loading');
-    // Don't disable - let the download happen
-    
-    // Reset after 30 seconds (in case download started)
-    setTimeout(() => {
-        this.classList.remove('loading');
-    }, 30000);
+    setTimeout(() => { this.classList.remove('loading'); }, 30000);
 });
 
-// Add loading state to individual download buttons
 document.querySelectorAll('.download-btn').forEach(btn => {
     btn.addEventListener('click', function() {
         const originalHtml = this.innerHTML;
         this.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
-        
-        // Reset after 5 seconds
-        setTimeout(() => {
-            this.innerHTML = originalHtml;
-        }, 5000);
+        setTimeout(() => { this.innerHTML = originalHtml; }, 5000);
     });
 });
+
+// Forward Modal Logic
+let modalSearchTimeout = null;
+let modalSelectedTarget = null;
+
+// Modal open handler
+document.getElementById('forwardModal').addEventListener('show.bs.modal', function(event) {
+    const button = event.relatedTarget;
+    const vmId = button.getAttribute('data-vm-id');
+    const vmCaller = button.getAttribute('data-vm-caller');
+    
+    document.getElementById('modalVoicemailId').value = vmId;
+    document.getElementById('modalCallerName').textContent = vmCaller;
+    
+    // Reset modal state
+    document.getElementById('modalSearchInput').value = '';
+    document.getElementById('modalSearchResults').innerHTML = '';
+    document.getElementById('modalSelectedTarget').style.display = 'none';
+    document.getElementById('modalForwardBtn').disabled = true;
+    modalSelectedTarget = null;
+});
+
+// Target type change
+document.querySelectorAll('input[name="modalTargetType"]').forEach(radio => {
+    radio.addEventListener('change', function() {
+        document.getElementById('modalSearchInput').value = '';
+        document.getElementById('modalSearchResults').innerHTML = '';
+        document.getElementById('modalSelectedTarget').style.display = 'none';
+        modalSelectedTarget = null;
+    });
+});
+
+// Search input
+document.getElementById('modalSearchInput').addEventListener('input', function() {
+    clearTimeout(modalSearchTimeout);
+    const query = this.value.trim();
+    
+    if (query.length < 2) {
+        document.getElementById('modalSearchResults').innerHTML = '';
+        return;
+    }
+    
+    modalSearchTimeout = setTimeout(() => {
+        const targetType = document.querySelector('input[name="modalTargetType"]:checked').value;
+        const endpoint = targetType === 'user' ? '/api/search/users' : '/api/search/groups';
+        
+        fetch(`${endpoint}?q=${encodeURIComponent(query)}`)
+            .then(response => response.json())
+            .then(data => {
+                displayModalResults(data, targetType);
+            });
+    }, 300);
+});
+
+function displayModalResults(data, targetType) {
+    const resultsDiv = document.getElementById('modalSearchResults');
+    const items = targetType === 'user' ? data.users : data.groups;
+    
+    if (!items || items.length === 0) {
+        resultsDiv.innerHTML = '<div class="text-muted">No results found</div>';
+        return;
+    }
+    
+    let html = '<div class="list-group">';
+    items.forEach(item => {
+        const icon = targetType === 'user' ? 'bi-person' : 'bi-people';
+        const subtitle = targetType === 'user' ? (item.email || '') : `${item.memberCount || 0} members`;
+        
+        html += `
+            <button type="button" class="list-group-item list-group-item-action" 
+                    onclick="selectModalTarget('${item.id}', '${item.name.replace(/'/g, "\\'")}', '${targetType}')">
+                <i class="bi ${icon} me-2"></i>
+                <strong>${item.name}</strong>
+                <small class="text-muted ms-2">${subtitle}</small>
+            </button>
+        `;
+    });
+    html += '</div>';
+    
+    resultsDiv.innerHTML = html;
+}
+
+function selectModalTarget(id, name, type) {
+    modalSelectedTarget = { id, name, type };
+    
+    document.getElementById('modalTargetId').value = id;
+    document.getElementById('modalTargetName').value = name;
+    document.getElementById('modalSelectedName').textContent = name;
+    document.getElementById('modalSelectedTarget').style.display = 'block';
+    document.getElementById('modalSearchResults').innerHTML = '';
+    document.getElementById('modalSearchInput').value = '';
+    document.getElementById('modalForwardBtn').disabled = false;
+}
+
+function forwardSingle() {
+    if (!modalSelectedTarget) return;
+    
+    const vmId = document.getElementById('modalVoicemailId').value;
+    const btn = document.getElementById('modalForwardBtn');
+    
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Forwarding...';
+    
+    fetch('/api/forward', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            voicemail_ids: [vmId],
+            target_id: modalSelectedTarget.id,
+            target_type: modalSelectedTarget.type
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        // Close modal
+        bootstrap.Modal.getInstance(document.getElementById('forwardModal')).hide();
+        
+        // Show result
+        if (data.success) {
+            showToast('success', `Voicemail forwarded to ${modalSelectedTarget.name}!`);
+        } else {
+            showToast('danger', `Failed to forward: ${data.errors.join(', ')}`);
+        }
+        
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-forward me-1"></i> Forward';
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-forward me-1"></i> Forward';
+        showToast('danger', 'An error occurred');
+    });
+}
+
+function showToast(type, message) {
+    // Create toast container if not exists
+    let container = document.getElementById('toastContainer');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'toastContainer';
+        container.className = 'toast-container position-fixed top-0 end-0 p-3';
+        container.style.zIndex = '1100';
+        document.body.appendChild(container);
+    }
+    
+    const toastId = 'toast-' + Date.now();
+    const toastHtml = `
+        <div id="${toastId}" class="toast align-items-center text-bg-${type}" role="alert">
+            <div class="d-flex">
+                <div class="toast-body">${message}</div>
+                <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+            </div>
+        </div>
+    `;
+    
+    container.insertAdjacentHTML('beforeend', toastHtml);
+    
+    const toastEl = document.getElementById(toastId);
+    const toast = new bootstrap.Toast(toastEl, { delay: 5000 });
+    toast.show();
+    
+    toastEl.addEventListener('hidden.bs.toast', () => toastEl.remove());
+}
 </script>
 {% endblock %}
