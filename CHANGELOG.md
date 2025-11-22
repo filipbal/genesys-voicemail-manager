@@ -1,46 +1,61 @@
-# Voicemail Manager - Performance & Rate Limiting Fixes
+# Voicemail Manager - Performance & Rate Limiting Fixes (v2)
 
 ## Issues Fixed
 
 ### 1. Rate Limiting on Bulk Operations (HTTP 429 Error)
-**Problem:** Forwarding 513 voicemails one-by-one hit API rate limits after ~50 operations.
+**Problem:** Forwarding/deleting voicemails hit API rate limits after ~50 operations, even with batching.
 
-**Solution:** Implemented batch processing with configurable settings:
-- `BATCH_SIZE = 25` - Operations per batch
-- `BATCH_DELAY = 2.0` - Seconds between batches
-- `OPERATION_DELAY = 0.3` - Seconds between operations within a batch
-- `MAX_RETRIES = 3` - Automatic retry on 429 with exponential backoff
+**Root Cause:** Genesys has a rolling ~50 request limit that resets over time, not just a per-batch limit.
+
+**Solution:** Implemented aggressive two-tier batching with longer delays:
+- **Smaller batches:** `BATCH_SIZE = 15` (well under the 50 limit)
+- **Longer delays:** `BATCH_DELAY = 10.0s` between batches
+- **Super batches:** After every 3 batches, take a 30-second break
+- **Emergency backoff:** If 3+ consecutive failures detected, wait 60 seconds
+- **Automatic retry:** Up to 5 retries on 429 with 30s backoff
 
 ### 2. Stale Count After Deletion
-**Problem:** After deleting a voicemail, the total count (513) wasn't updating.
+**Problem:** After deleting a voicemail, the total count wasn't updating.
 
 **Solution:** 
 - Added `invalidate_voicemail_cache()` function called after all modifications
 - Dashboard now shows refresh parameter `?refresh=1` in back links
 - Cache TTL set to 60 seconds for auto-refresh
 
-### 3. Improved API Request Handling
-**New:** `make_api_request()` helper function with:
-- Automatic retry on 429 (rate limit) responses
-- Configurable retry count and backoff
-- Proper error handling for all HTTP errors
-- Respect for `Retry-After` header when present
+### 3. Improved Error Detection
+**New:** The batch processor now detects rate limiting patterns:
+- Tracks consecutive failures
+- If 3+ failures in a row, triggers emergency delay
+- Reports `rate_limited: true` in results if rate limiting was detected
 
-## Configuration Parameters
+## Configuration Parameters (v2)
 
 ```python
-# Rate Limiting and Batch Configuration
+# Rate Limiting and Batch Configuration - CONSERVATIVE
 API_PAGE_SIZE = 100        # Genesys API max page size
 DISPLAY_PAGE_SIZE = 50     # Items per page in UI
 
-BATCH_SIZE = 25            # Operations per batch
-BATCH_DELAY = 2.0          # Seconds between batches
-OPERATION_DELAY = 0.3      # Seconds between operations
-RATE_LIMIT_BACKOFF = 5.0   # Default backoff on 429
-MAX_RETRIES = 3            # Max retries per request
+BATCH_SIZE = 15            # Operations per batch (keep well under 50)
+BATCH_DELAY = 10.0         # Seconds between batches
+OPERATION_DELAY = 0.5      # Seconds between operations
+RATE_LIMIT_BACKOFF = 30.0  # Default backoff on 429
+MAX_RETRIES = 5            # Max retries per request
+
+# Super batch - prevents hitting rolling rate limits
+SUPER_BATCH_SIZE = 3       # Number of batches before long break
+SUPER_BATCH_DELAY = 30.0   # Seconds for super batch break
 
 CACHE_TTL = 60             # Cache validity in seconds
 ```
+
+## Time Estimates
+
+With these settings, operations will take approximately:
+- **50 voicemails:** ~1 minute
+- **100 voicemails:** ~2-3 minutes
+- **500 voicemails:** ~15-20 minutes
+
+The UI now shows more realistic progress estimates.
 
 ## Updated Files
 

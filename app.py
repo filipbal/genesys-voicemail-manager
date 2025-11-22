@@ -82,12 +82,17 @@ os.makedirs(TEMP_DIR, exist_ok=True)
 API_PAGE_SIZE = 100  # Genesys API max is typically 100
 DISPLAY_PAGE_SIZE = 50  # Number of voicemails to display per page in UI
 
-# Batch processing settings
-BATCH_SIZE = 25  # Number of operations per batch (forward/delete)
-BATCH_DELAY = 2.0  # Seconds to wait between batches
-OPERATION_DELAY = 0.3  # Seconds between individual operations within a batch
-RATE_LIMIT_BACKOFF = 5.0  # Seconds to wait after rate limit hit
-MAX_RETRIES = 3  # Max retries for rate-limited requests
+# Batch processing settings - VERY CONSERVATIVE due to Genesys hard limits
+# Genesys appears to have a rolling ~50 request limit per minute
+BATCH_SIZE = 15  # Number of operations per batch (keep well under 50)
+BATCH_DELAY = 10.0  # Seconds to wait between batches (allow rate limit to reset)
+OPERATION_DELAY = 0.5  # Seconds between individual operations within a batch
+RATE_LIMIT_BACKOFF = 30.0  # Seconds to wait after rate limit hit (longer backoff)
+MAX_RETRIES = 5  # Max retries for rate-limited requests
+
+# Super batch - after every N batches, take a longer break
+SUPER_BATCH_SIZE = 3  # Number of batches before taking a longer break
+SUPER_BATCH_DELAY = 30.0  # Seconds to wait after super batch (let rate limit fully reset)
 
 # Cache settings (in-memory, per session)
 CACHE_TTL = 60  # Seconds to cache voicemail data
@@ -506,6 +511,12 @@ def process_voicemails_in_batches(access_token, region_host, voicemail_ids, oper
     """
     Process voicemails in batches to avoid rate limiting.
     
+    Uses a two-tier batching system:
+    - Regular batches: BATCH_SIZE items with BATCH_DELAY between them
+    - Super batches: After SUPER_BATCH_SIZE batches, take SUPER_BATCH_DELAY break
+    
+    This helps avoid Genesys's rolling ~50 request/minute limit.
+    
     Args:
         voicemail_ids: List of voicemail IDs to process
         operation: 'forward' or 'delete'
@@ -520,19 +531,34 @@ def process_voicemails_in_batches(access_token, region_host, voicemail_ids, oper
         'failed': 0,
         'errors': [],
         'total': len(voicemail_ids),
-        'processed': 0
+        'processed': 0,
+        'rate_limited': False
     }
     
     total_ids = len(voicemail_ids)
+    total_batches = (total_ids + BATCH_SIZE - 1) // BATCH_SIZE
+    batches_since_super_break = 0
+    consecutive_failures = 0
+    
+    app.logger.info(f"Starting {operation} operation: {total_ids} items in {total_batches} batches")
+    app.logger.info(f"Settings: BATCH_SIZE={BATCH_SIZE}, BATCH_DELAY={BATCH_DELAY}s, SUPER_BATCH after {SUPER_BATCH_SIZE} batches")
     
     # Process in batches
     for batch_start in range(0, total_ids, BATCH_SIZE):
         batch_end = min(batch_start + BATCH_SIZE, total_ids)
         batch = voicemail_ids[batch_start:batch_end]
         batch_num = (batch_start // BATCH_SIZE) + 1
-        total_batches = (total_ids + BATCH_SIZE - 1) // BATCH_SIZE
         
         app.logger.info(f"Processing batch {batch_num}/{total_batches} ({len(batch)} items)")
+        
+        # Check if we need a super batch break BEFORE processing
+        if batches_since_super_break >= SUPER_BATCH_SIZE and batch_num > 1:
+            app.logger.info(f"Super batch break: waiting {SUPER_BATCH_DELAY}s to let rate limits reset...")
+            time.sleep(SUPER_BATCH_DELAY)
+            batches_since_super_break = 0
+            consecutive_failures = 0  # Reset failure count after break
+        
+        batch_failures = 0
         
         for idx, vm_id in enumerate(batch):
             try:
@@ -547,9 +573,24 @@ def process_voicemails_in_batches(access_token, region_host, voicemail_ids, oper
                 
                 if success:
                     results['success'] += 1
+                    consecutive_failures = 0  # Reset on success
                 else:
                     results['failed'] += 1
                     results['errors'].append(f"VM {vm_id[:8]}...: {result}")
+                    batch_failures += 1
+                    consecutive_failures += 1
+                    
+                    # Check if this looks like rate limiting (multiple consecutive failures)
+                    if consecutive_failures >= 3:
+                        app.logger.warning(f"Detected possible rate limiting ({consecutive_failures} consecutive failures)")
+                        results['rate_limited'] = True
+                        
+                        # Take an emergency break
+                        emergency_delay = SUPER_BATCH_DELAY * 2
+                        app.logger.info(f"Emergency rate limit break: waiting {emergency_delay}s...")
+                        time.sleep(emergency_delay)
+                        consecutive_failures = 0
+                        batches_since_super_break = 0
                 
                 results['processed'] += 1
                 
@@ -561,13 +602,26 @@ def process_voicemails_in_batches(access_token, region_host, voicemail_ids, oper
                 results['failed'] += 1
                 results['errors'].append(f"VM {vm_id[:8]}...: {str(e)}")
                 results['processed'] += 1
+                consecutive_failures += 1
         
-        # Longer delay between batches
+        batches_since_super_break += 1
+        
+        # Log batch completion
+        app.logger.info(f"Batch {batch_num} complete: {len(batch) - batch_failures} succeeded, {batch_failures} failed")
+        
+        # Regular delay between batches (if more batches to process)
         if batch_end < total_ids:
-            app.logger.info(f"Batch {batch_num} complete. Waiting {BATCH_DELAY}s before next batch...")
-            time.sleep(BATCH_DELAY)
+            # If we had failures in this batch, wait longer
+            delay = BATCH_DELAY * 2 if batch_failures > 0 else BATCH_DELAY
+            app.logger.info(f"Waiting {delay}s before next batch...")
+            time.sleep(delay)
     
     # Invalidate cache after modifications
+    invalidate_voicemail_cache()
+    
+    app.logger.info(f"Operation complete: {results['success']} succeeded, {results['failed']} failed out of {results['total']}")
+    
+    return results
     invalidate_voicemail_cache()
     
     return results
