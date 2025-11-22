@@ -66,15 +66,7 @@ REDIRECT_URI = os.environ.get('REDIRECT_URI', 'http://127.0.0.1:5000/callback')
 
 # Genesys Cloud Regions
 REGIONS = {
-    "emea": {"name": "EMEA (Frankfurt)", "host": "mypurecloud.de"},
-    "us_west": {"name": "US West", "host": "usw2.pure.cloud"},
-    "us_east": {"name": "US East", "host": "mypurecloud.com"},
-    "asia_mumbai": {"name": "Asia Pacific South (Mumbai)", "host": "aps1.pure.cloud"},
-    "asia_tokyo": {"name": "Asia Pacific (Tokyo)", "host": "mypurecloud.jp"},
-    "asia_sydney": {"name": "Asia Pacific (Sydney)", "host": "mypurecloud.com.au"},
-    "canada": {"name": "Canada", "host": "cac1.pure.cloud"},
-    "eu_london": {"name": "Europe (London)", "host": "euw2.pure.cloud"},
-    "eu_ireland": {"name": "Europe (Ireland)", "host": "mypurecloud.ie"},
+    "us_west": {"name": "US West", "host": "usw2.pure.cloud"}
 }
 
 # Temporary directory for downloads
