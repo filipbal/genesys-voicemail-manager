@@ -171,7 +171,7 @@ def get_voicemails(access_token, region_host):
     page_size = 100
     
     while True:
-        url = f"https://api.{region_host}/api/v2/voicemail/me/messages"
+        url = f"https://api.{region_host}/api/v2/voicemail/messages"
         params = {'pageSize': page_size, 'pageNumber': page_number}
         url_with_params = f"{url}?{urllib.parse.urlencode(params)}"
         
