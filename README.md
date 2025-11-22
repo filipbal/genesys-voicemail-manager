@@ -8,11 +8,6 @@ Genesys Cloud enforces user-level ownership on voicemail media—administrators 
 
 ## Features
 
-### Authentication
-- **OAuth 2.0 with PKCE** - Secure browser-based authentication
-- **Multi-region support** - Works with all Genesys Cloud regions (EMEA, US East, US West, Asia Pacific, etc.)
-- **Session-based tokens** - Access tokens stored securely in server-side sessions
-
 ### Voicemail Management
 - **View voicemails** - List all voicemails with caller info, date, duration, and read status
 - **Download individual** - Download single voicemail as WAV file
@@ -20,6 +15,15 @@ Genesys Cloud enforces user-level ownership on voicemail media—administrators 
 - **Delete individual** - Remove single voicemail with confirmation
 - **Delete all** - Bulk delete all voicemails with confirmation
 - **Forward to user/group** - Forward voicemail to another Genesys user/group
+
+## Security
+
+- **No password storage** - Authentication handled entirely by Genesys Cloud OAuth 2.0 with PKCE
+- **Token security** - Access tokens stored only in server-side sessions
+- **User isolation** - Each user can only access their own voicemails
+- **HTTPS required** - All production traffic encrypted
+- **CSRF protection** - OAuth state parameter prevents cross-site request forgery
+- **Temporary files** - Downloaded files cleaned up automatically
 
 ## Supported Genesys Regions
 
@@ -81,15 +85,6 @@ Genesys Cloud enforces user-level ownership on voicemail media—administrators 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/health` | GET | Health check endpoint |
-
-## Security
-
-- **No password storage** - Authentication handled entirely by Genesys Cloud OAuth
-- **Token security** - Access tokens stored only in server-side sessions
-- **User isolation** - Each user can only access their own voicemails
-- **HTTPS required** - All production traffic encrypted
-- **CSRF protection** - OAuth state parameter prevents cross-site request forgery
-- **Temporary files** - Downloaded files cleaned up automatically
 
 ## Troubleshooting
 
