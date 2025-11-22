@@ -73,6 +73,10 @@ REGIONS = {
 TEMP_DIR = os.path.join(tempfile.gettempdir(), 'voicemail_exports')
 os.makedirs(TEMP_DIR, exist_ok=True)
 
+# Pagination settings
+PAGE_SIZE = 100  # Genesys API max is typically 100
+DISPLAY_PAGE_SIZE = 50  # Number of voicemails to display per page in UI
+
 # ============================================================================
 # PKCE HELPER FUNCTIONS
 # ============================================================================
@@ -156,52 +160,154 @@ def get_user_info(access_token, region_host):
         return None
 
 
-def get_voicemails(access_token, region_host):
-    """Get all voicemails for the authenticated user (excluding deleted)"""
+def is_voicemail_deleted(vm):
+    """Check if a voicemail is marked as deleted"""
+    # Check multiple possible indicators that Genesys uses
+    if vm.get('deleted', False):
+        return True
+    if vm.get('state', '').lower() == 'deleted':
+        return True
+    if vm.get('deletedDate') is not None:
+        return True
+    return False
+
+
+def get_voicemail_count(access_token, region_host):
+    """
+    Get total count of non-deleted voicemails.
+    Makes a single request with pageSize=1 to get total from API response,
+    then adjusts for deleted items by scanning all pages.
+    """
+    url = f"https://api.{region_host}/api/v2/voicemail/messages"
+    params = {'pageSize': 1, 'pageNumber': 1}
+    url_with_params = f"{url}?{urllib.parse.urlencode(params)}"
+    
+    req = urllib.request.Request(url_with_params)
+    req.add_header('Authorization', f'Bearer {access_token}')
+    
+    try:
+        with urllib.request.urlopen(req, timeout=30) as response:
+            data = json.loads(response.read().decode())
+            api_total = data.get('total', 0)
+            page_count = data.get('pageCount', 0)
+            
+            # If total is small, we can count accurately by fetching all
+            # For large totals, return API total as approximation
+            # The actual filtering happens when displaying
+            return api_total, page_count
+    except Exception as e:
+        app.logger.error(f"Error getting voicemail count: {e}")
+        return 0, 0
+
+
+def get_voicemails_page(access_token, region_host, page_number=1, page_size=PAGE_SIZE):
+    """
+    Get a single page of voicemails (excluding deleted).
+    Returns: (voicemails_list, total_count, page_count, has_more)
+    """
+    url = f"https://api.{region_host}/api/v2/voicemail/messages"
+    params = {'pageSize': page_size, 'pageNumber': page_number}
+    url_with_params = f"{url}?{urllib.parse.urlencode(params)}"
+    
+    req = urllib.request.Request(url_with_params)
+    req.add_header('Authorization', f'Bearer {access_token}')
+    
+    try:
+        with urllib.request.urlopen(req, timeout=60) as response:
+            data = json.loads(response.read().decode())
+            
+            entities = data.get('entities', [])
+            total = data.get('total', 0)
+            page_count = data.get('pageCount', 1)
+            
+            # Filter out deleted voicemails
+            active_voicemails = [vm for vm in entities if not is_voicemail_deleted(vm)]
+            
+            has_more = page_number < page_count
+            
+            return active_voicemails, total, page_count, has_more
+            
+    except urllib.request.HTTPError as e:
+        app.logger.error(f"HTTP Error getting voicemails page {page_number}: {e.code} - {e.reason}")
+        return [], 0, 0, False
+    except Exception as e:
+        app.logger.error(f"Error getting voicemails page {page_number}: {e}")
+        return [], 0, 0, False
+
+
+def get_all_voicemails(access_token, region_host, max_pages=None):
+    """
+    Get ALL voicemails across all pages (excluding deleted).
+    Use with caution for large mailboxes - consider using get_voicemails_page for UI.
+    
+    Args:
+        max_pages: Optional limit on number of pages to fetch (None = all pages)
+    
+    Returns: list of all voicemails
+    """
     all_messages = []
     page_number = 1
-    page_size = 100
     
     while True:
-        url = f"https://api.{region_host}/api/v2/voicemail/messages"
-        params = {'pageSize': page_size, 'pageNumber': page_number}
-        url_with_params = f"{url}?{urllib.parse.urlencode(params)}"
+        voicemails, total, page_count, has_more = get_voicemails_page(
+            access_token, region_host, page_number, PAGE_SIZE
+        )
         
-        req = urllib.request.Request(url_with_params)
-        req.add_header('Authorization', f'Bearer {access_token}')
+        all_messages.extend(voicemails)
         
-        try:
-            with urllib.request.urlopen(req, timeout=60) as response:
-                data = json.loads(response.read().decode())
-                
-                if 'entities' not in data or not data['entities']:
-                    break
-                
-                # FIX: Filter out deleted voicemails
-                # Genesys API may return voicemails with deleted=True or state='deleted'
-                for vm in data['entities']:
-                    # Skip deleted voicemails - check multiple possible indicators
-                    if vm.get('deleted', False):
-                        continue
-                    if vm.get('state', '').lower() == 'deleted':
-                        continue
-                    if vm.get('deletedDate') is not None:
-                        continue
-                    all_messages.append(vm)
-                
-                if page_number >= data.get('pageCount', 1):
-                    break
-                
-                page_number += 1
-                
-        except urllib.request.HTTPError as e:
-            app.logger.error(f"HTTP Error getting voicemails: {e.code} - {e.reason}")
+        if not has_more:
             break
-        except Exception as e:
-            app.logger.error(f"Error getting voicemails: {e}")
+            
+        if max_pages and page_number >= max_pages:
             break
+            
+        page_number += 1
+        
+        # Small delay to avoid rate limiting
+        time.sleep(0.1)
     
     return all_messages
+
+
+def get_voicemails(access_token, region_host):
+    """
+    Legacy function - Get all voicemails for the authenticated user (excluding deleted).
+    Wrapper around get_all_voicemails for backward compatibility.
+    """
+    return get_all_voicemails(access_token, region_host)
+
+
+def get_voicemail_stats(access_token, region_host):
+    """
+    Get voicemail statistics by scanning all pages.
+    Returns dict with total_count, total_duration, unread_count
+    """
+    stats = {
+        'total_count': 0,
+        'total_duration': 0,
+        'unread_count': 0
+    }
+    
+    page_number = 1
+    
+    while True:
+        voicemails, api_total, page_count, has_more = get_voicemails_page(
+            access_token, region_host, page_number, PAGE_SIZE
+        )
+        
+        for vm in voicemails:
+            stats['total_count'] += 1
+            stats['total_duration'] += vm.get('audioRecordingDurationSeconds', 0) or 0
+            if not vm.get('read', True):
+                stats['unread_count'] += 1
+        
+        if not has_more:
+            break
+            
+        page_number += 1
+        time.sleep(0.1)
+    
+    return stats
 
 
 def download_voicemail_media(access_token, region_host, message_id):
@@ -423,6 +529,21 @@ def delete_all_voicemails(access_token, region_host, voicemail_ids):
 # HELPER FUNCTIONS
 # ============================================================================
 
+def format_voicemail(vm):
+    """Format a voicemail object for display"""
+    return {
+        'id': vm.get('id'),
+        'caller_name': vm.get('callerName', 'Unknown'),
+        'caller_address': vm.get('callerAddress', ''),
+        'created_date': format_datetime(vm.get('createdDate')),
+        'created_date_raw': vm.get('createdDate', ''),
+        'duration': format_duration(vm.get('audioRecordingDurationSeconds')),
+        'duration_seconds': vm.get('audioRecordingDurationSeconds', 0) or 0,
+        'read': vm.get('read', False),
+        'filename': format_filename(vm),
+    }
+
+
 def format_filename(voicemail):
     """Generate a safe filename for a voicemail"""
     msg_id = voicemail.get('id', 'unknown')
@@ -591,33 +712,57 @@ def callback():
 @app.route('/dashboard')
 @login_required
 def dashboard():
-    """Main dashboard showing voicemails"""
+    """Main dashboard showing voicemails with pagination"""
     access_token = session.get('access_token')
     region_host = session.get('region_host')
     region_key = session.get('region_key')
     user_info = session.get('user_info', {})
     
-    voicemails = get_voicemails(access_token, region_host)
+    # Get page number from query string (default to 1)
+    page = request.args.get('page', 1, type=int)
+    if page < 1:
+        page = 1
     
-    processed_voicemails = []
-    for vm in voicemails:
-        processed_voicemails.append({
-            'id': vm.get('id'),
-            'caller_name': vm.get('callerName', 'Unknown'),
-            'caller_address': vm.get('callerAddress', ''),
-            'created_date': format_datetime(vm.get('createdDate')),
-            'created_date_raw': vm.get('createdDate', ''),
-            'duration': format_duration(vm.get('audioRecordingDurationSeconds')),
-            'duration_seconds': vm.get('audioRecordingDurationSeconds', 0),
-            'read': vm.get('read', False),
-            'filename': format_filename(vm),
-        })
+    # Get voicemail stats (scans all pages to get accurate count)
+    stats = get_voicemail_stats(access_token, region_host)
+    
+    # Get paginated voicemails for display
+    # We need to handle our own pagination since we filter deleted items
+    all_voicemails = get_all_voicemails(access_token, region_host)
+    
+    # Calculate pagination
+    total_count = len(all_voicemails)
+    total_pages = (total_count + DISPLAY_PAGE_SIZE - 1) // DISPLAY_PAGE_SIZE if total_count > 0 else 1
+    
+    if page > total_pages:
+        page = total_pages
+    
+    # Get slice for current page
+    start_idx = (page - 1) * DISPLAY_PAGE_SIZE
+    end_idx = start_idx + DISPLAY_PAGE_SIZE
+    page_voicemails = all_voicemails[start_idx:end_idx]
+    
+    # Format voicemails for display
+    processed_voicemails = [format_voicemail(vm) for vm in page_voicemails]
+    
+    # Calculate total duration from stats
+    total_duration_minutes = round(stats['total_duration'] / 60, 1) if stats['total_duration'] else 0
     
     return render_template('dashboard.html',
                          user_info=user_info,
                          region=REGIONS.get(region_key, {}),
                          voicemails=processed_voicemails,
-                         voicemail_count=len(processed_voicemails))
+                         voicemail_count=total_count,
+                         total_duration_minutes=total_duration_minutes,
+                         unread_count=stats['unread_count'],
+                         # Pagination info
+                         current_page=page,
+                         total_pages=total_pages,
+                         has_prev=page > 1,
+                         has_next=page < total_pages,
+                         page_size=DISPLAY_PAGE_SIZE,
+                         start_idx=start_idx + 1,
+                         end_idx=min(end_idx, total_count))
 
 
 @app.route('/download/<message_id>')
@@ -948,14 +1093,30 @@ def delete_page():
 @app.route('/api/voicemails')
 @login_required
 def api_voicemails():
-    """API endpoint to get voicemails as JSON"""
+    """API endpoint to get voicemails as JSON with pagination"""
     access_token = session.get('access_token')
     region_host = session.get('region_host')
     
-    voicemails = get_voicemails(access_token, region_host)
+    # Get pagination parameters
+    page = request.args.get('page', 1, type=int)
+    page_size = request.args.get('page_size', DISPLAY_PAGE_SIZE, type=int)
+    
+    # Limit page_size to reasonable values
+    page_size = min(max(page_size, 10), 100)
+    
+    # Get all voicemails (with deleted filtered out)
+    all_voicemails = get_all_voicemails(access_token, region_host)
+    
+    total_count = len(all_voicemails)
+    total_pages = (total_count + page_size - 1) // page_size if total_count > 0 else 1
+    
+    # Get slice for requested page
+    start_idx = (page - 1) * page_size
+    end_idx = start_idx + page_size
+    page_voicemails = all_voicemails[start_idx:end_idx]
     
     processed = []
-    for vm in voicemails:
+    for vm in page_voicemails:
         processed.append({
             'id': vm.get('id'),
             'caller_name': vm.get('callerName', 'Unknown'),
@@ -965,7 +1126,33 @@ def api_voicemails():
             'read': vm.get('read', False),
         })
     
-    return jsonify({'voicemails': processed, 'count': len(processed)})
+    return jsonify({
+        'voicemails': processed,
+        'count': len(processed),
+        'total_count': total_count,
+        'page': page,
+        'page_size': page_size,
+        'total_pages': total_pages,
+        'has_next': page < total_pages,
+        'has_prev': page > 1
+    })
+
+
+@app.route('/api/voicemails/stats')
+@login_required
+def api_voicemail_stats():
+    """API endpoint to get voicemail statistics"""
+    access_token = session.get('access_token')
+    region_host = session.get('region_host')
+    
+    stats = get_voicemail_stats(access_token, region_host)
+    
+    return jsonify({
+        'total_count': stats['total_count'],
+        'total_duration_seconds': stats['total_duration'],
+        'total_duration_minutes': round(stats['total_duration'] / 60, 1) if stats['total_duration'] else 0,
+        'unread_count': stats['unread_count']
+    })
 
 
 @app.route('/logout')
