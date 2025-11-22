@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+
+{% block title %}Login{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-6 col-md-8">
+        <div class="text-center mb-4">
+            <h1 class="display-6">
+                <i class="bi bi-voicemail text-danger"></i>
+            </h1>
+            <h2>Genesys Cloud Voicemail Exporter</h2>
+            <p class="text-muted">Download your voicemails before account deactivation</p>
+        </div>
+        
+        {% if not client_configured %}
+        <div class="alert alert-danger" role="alert">
+            <i class="bi bi-exclamation-triangle-fill me-2"></i>
+            <strong>Configuration Required:</strong> OAuth Client ID is not configured. 
+            Please contact the system administrator.
+        </div>
+        {% else %}
+        
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    <i class="bi bi-box-arrow-in-right me-2"></i>
+                    Login with Genesys Cloud
+                </h5>
+            </div>
+            <div class="card-body">
+                <form method="POST" action="{{ url_for('login') }}" id="loginForm">
+                    <div class="mb-4">
+                        <label for="region" class="form-label">
+                            <i class="bi bi-globe me-1"></i>
+                            Select your Genesys Cloud region:
+                        </label>
+                        <select class="form-select form-select-lg" name="region" id="region" required>
+                            <option value="" disabled selected>-- Select Region --</option>
+                            {% for key, region in regions.items() %}
+                            <option value="{{ key }}">{{ region.name }}</option>
+                            {% endfor %}
+                        </select>
+                        <div class="form-text">
+                            Choose the region where your Genesys Cloud organization is hosted.
+                        </div>
+                    </div>
+                    
+                    <div class="d-grid">
+                        <button type="submit" class="btn btn-genesys btn-lg" id="loginBtn">
+                            <span class="btn-text">
+                                <i class="bi bi-box-arrow-in-right me-2"></i>
+                                Login with Genesys Cloud
+                            </span>
+                            <span class="loading-spinner">
+                                <span class="spinner-border spinner-border-sm me-2"></span>
+                                Redirecting to Genesys...
+                            </span>
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+        
+        <div class="card mt-4">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    <i class="bi bi-info-circle me-2"></i>
+                    How it works
+                </h5>
+            </div>
+            <div class="card-body">
+                <ol class="mb-0">
+                    <li class="mb-2">
+                        <strong>Select your region</strong> - Choose the Genesys Cloud region 
+                        where your organization is hosted.
+                    </li>
+                    <li class="mb-2">
+                        <strong>Login with your Genesys credentials</strong> - You'll be 
+                        redirected to Genesys Cloud to authenticate.
+                    </li>
+                    <li class="mb-2">
+                        <strong>View your voicemails</strong> - See a list of all your 
+                        voicemail messages.
+                    </li>
+                    <li class="mb-0">
+                        <strong>Download</strong> - Download individual voicemails or 
+                        all of them as a ZIP file.
+                    </li>
+                </ol>
+            </div>
+        </div>
+        
+        <div class="card mt-4 border-warning">
+            <div class="card-header bg-warning bg-opacity-10">
+                <h5 class="mb-0 text-warning">
+                    <i class="bi bi-shield-lock me-2"></i>
+                    Security & Privacy
+                </h5>
+            </div>
+            <div class="card-body">
+                <ul class="mb-0 small">
+                    <li>Your password is <strong>never</strong> stored or seen by this application.</li>
+                    <li>Authentication is handled directly by Genesys Cloud using OAuth 2.0 PKCE.</li>
+                    <li>You can only access your own voicemails - not anyone else's.</li>
+                    <li>Session data is temporary and cleared on logout.</li>
+                    <li>Downloaded files are automatically deleted from the server after 1 hour.</li>
+                </ul>
+            </div>
+        </div>
+        
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.getElementById('loginForm')?.addEventListener('submit', function() {
+    const btn = document.getElementById('loginBtn');
+    btn.classList.add('loading');
+    btn.disabled = true;
+});
+</script>
+{% endblock %}

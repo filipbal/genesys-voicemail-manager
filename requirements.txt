@@ -1,0 +1,4 @@
+# Genesys Voicemail Web Exporter - Requirements
+# For PythonAnywhere deployment
+
+Flask>=2.3.0
