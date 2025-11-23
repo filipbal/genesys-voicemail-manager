@@ -253,9 +253,20 @@ function downloadVoicemails() {
         })
     })
     .then(response => {
+        // Check content type to determine if it's an error response
+        const contentType = response.headers.get('content-type') || '';
+
+        if (contentType.includes('application/json')) {
+            // JSON response means error
+            return response.json().then(data => {
+                throw new Error(data.error || 'Download failed');
+            });
+        }
+
         if (!response.ok) {
             throw new Error('Download failed');
         }
+
         return response.blob();
     })
     .then(blob => {
@@ -280,7 +291,7 @@ function downloadVoicemails() {
         console.error('Download error:', error);
         progressModal.hide();
         updateSelectedCount();
-        alert('Download failed. Please try again or use "Prepare Batches" for large downloads.');
+        alert('Download failed: ' + error.message);
     });
 }
 
