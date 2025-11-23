@@ -25,13 +25,13 @@
     </div>
 </div>
 
-<!-- Batch Processing Info -->
+<!-- Info Alert -->
 <div class="alert alert-info mb-4">
     <div class="d-flex align-items-center">
         <i class="bi bi-info-circle-fill me-3 fs-4"></i>
         <div>
-            <strong>Load-Balanced Downloads:</strong> For large downloads, voicemails are split into batches of {{ batch_download_size }} each.
-            <br><small class="text-muted">Each batch downloads as a separate ZIP file. Links expire after 1 hour.</small>
+            <strong>Client-Side ZIP Creation:</strong> Files are downloaded directly to your browser and zipped locally.
+            <br><small class="text-muted">No files are stored on the server. Large downloads are processed in batches to prevent timeouts.</small>
         </div>
     </div>
 </div>
@@ -60,7 +60,7 @@
                 <thead class="table-light sticky-top">
                     <tr>
                         <th scope="col" style="width: 40px;">
-                            <input type="checkbox" class="form-check-input" id="selectAllCheckbox" 
+                            <input type="checkbox" class="form-check-input" id="selectAllCheckbox"
                                    onchange="toggleSelectAll(this)">
                         </th>
                         <th scope="col">Caller</th>
@@ -73,8 +73,10 @@
                     {% for vm in voicemails %}
                     <tr class="voicemail-row">
                         <td>
-                            <input type="checkbox" class="form-check-input voicemail-checkbox" 
-                                   value="{{ vm.id }}" data-caller="{{ vm.caller_name }}">
+                            <input type="checkbox" class="form-check-input voicemail-checkbox"
+                                   value="{{ vm.id }}"
+                                   data-filename="{{ vm.filename }}"
+                                   data-caller="{{ vm.caller_name }}">
                         </td>
                         <td>
                             <i class="bi bi-person me-1 text-muted"></i>
@@ -112,25 +114,14 @@
             <div>
                 <span id="selectedCount" class="text-muted">0 voicemails selected</span>
                 <span id="batchInfo" class="text-muted ms-2" style="display: none;">
-                    (will create <span id="batchCount">0</span> download batches)
+                    (will process in <span id="batchCount">0</span> batches)
                 </span>
             </div>
-            <div class="btn-group">
-                <button type="button" class="btn btn-outline-success btn-lg" id="downloadSingleBtn" onclick="downloadVoicemails()" disabled>
-                    <i class="bi bi-download me-2"></i>
-                    Single ZIP
-                </button>
-                <button type="button" class="btn btn-success btn-lg" id="prepareBatchBtn" onclick="prepareBatchDownloads()" disabled>
-                    <i class="bi bi-collection me-2"></i>
-                    Prepare Batches
-                </button>
-            </div>
+            <button type="button" class="btn btn-success btn-lg" id="downloadBtn" onclick="downloadVoicemails()" disabled>
+                <i class="bi bi-download me-2"></i>
+                Download as ZIP
+            </button>
         </div>
-        <small class="text-muted d-block mt-2">
-            <i class="bi bi-info-circle me-1"></i>
-            <strong>Single ZIP:</strong> Downloads all in one file (may timeout for large selections).
-            <strong>Prepare Batches:</strong> Creates multiple smaller ZIPs for reliable download.
-        </small>
     </div>
 </div>
 
@@ -145,31 +136,43 @@
                 </h5>
             </div>
             <div class="modal-body">
-                <div class="text-center mb-3">
-                    <div class="spinner-border text-success" role="status" style="width: 3rem; height: 3rem;">
-                        <span class="visually-hidden">Processing...</span>
+                <div class="mb-3">
+                    <div class="progress" style="height: 25px;">
+                        <div class="progress-bar progress-bar-striped progress-bar-animated bg-success"
+                             role="progressbar"
+                             id="progressBar"
+                             style="width: 0%">
+                            0%
+                        </div>
                     </div>
                 </div>
                 <p class="text-center mb-2">
-                    Downloading <strong id="progressTotal">0</strong> voicemails...
+                    <strong id="progressText">Preparing download...</strong>
                 </p>
-                <p class="text-center text-muted small mb-0">
+                <p class="text-center text-muted small mb-0" id="progressDetail">
                     <i class="bi bi-info-circle me-1"></i>
-                    <span id="progressStatus">This may take several minutes for large downloads. Please wait...</span>
+                    Files are being downloaded and zipped in your browser.
                 </p>
             </div>
         </div>
     </div>
 </div>
-
-<!-- Remove Results Modal - not needed with simple download -->
 {% endblock %}
 
 {% block extra_js %}
+<!-- JSZip Library -->
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+
 <script>
-const BATCH_SIZE = {{ batch_size }};
-const BATCH_DOWNLOAD_SIZE = {{ batch_download_size }};
+// Configuration
+const BATCH_SIZE = 50;           // Files per batch
+const FILE_DELAY = 500;          // 0.5s between files
+const BATCH_DELAY = 3000;        // 3s between batches
+const SUPER_BATCH_SIZE = 5;      // Batches before super break
+const SUPER_BATCH_DELAY = 10000; // 10s super break
+
 let selectedVoicemails = [];
+let isDownloading = false;
 
 // Voicemail selection handlers
 document.querySelectorAll('.voicemail-checkbox').forEach(checkbox => {
@@ -200,149 +203,202 @@ function selectNone() {
 }
 
 function updateSelectedCount() {
-    const count = document.querySelectorAll('.voicemail-checkbox:checked').length;
+    const checkboxes = document.querySelectorAll('.voicemail-checkbox:checked');
+    const count = checkboxes.length;
     document.getElementById('selectedCount').textContent = `${count} voicemail${count !== 1 ? 's' : ''} selected`;
+    document.getElementById('downloadBtn').disabled = count === 0 || isDownloading;
 
-    // Enable/disable buttons based on selection
-    const singleBtn = document.getElementById('downloadSingleBtn');
-    const batchBtn = document.getElementById('prepareBatchBtn');
-    singleBtn.disabled = count === 0;
-    batchBtn.disabled = count === 0;
-
-    // Show batch info for selections that will create multiple batches
+    // Show batch info
     const batchInfo = document.getElementById('batchInfo');
     const batchCount = document.getElementById('batchCount');
 
-    if (count > BATCH_DOWNLOAD_SIZE) {
-        const batches = Math.ceil(count / BATCH_DOWNLOAD_SIZE);
+    if (count > BATCH_SIZE) {
+        const batches = Math.ceil(count / BATCH_SIZE);
         batchCount.textContent = batches;
         batchInfo.style.display = 'inline';
     } else {
         batchInfo.style.display = 'none';
     }
 
-    // Update list of selected voicemails
-    selectedVoicemails = Array.from(document.querySelectorAll('.voicemail-checkbox:checked'))
-        .map(cb => cb.value);
+    // Build selected voicemails list with metadata
+    selectedVoicemails = Array.from(checkboxes).map(cb => ({
+        id: cb.value,
+        filename: cb.dataset.filename,
+        caller: cb.dataset.caller
+    }));
 }
 
-function downloadVoicemails() {
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function updateProgress(current, total, batchNum, totalBatches, status) {
+    const percent = Math.round((current / total) * 100);
+    const progressBar = document.getElementById('progressBar');
+    const progressText = document.getElementById('progressText');
+    const progressDetail = document.getElementById('progressDetail');
+
+    progressBar.style.width = `${percent}%`;
+    progressBar.textContent = `${percent}%`;
+
+    if (status === 'downloading') {
+        progressText.textContent = `Downloaded ${current} of ${total} files`;
+        if (totalBatches > 1) {
+            progressDetail.innerHTML = `<i class="bi bi-collection me-1"></i> Processing batch ${batchNum} of ${totalBatches}`;
+        } else {
+            progressDetail.innerHTML = `<i class="bi bi-hourglass-split me-1"></i> Please wait...`;
+        }
+    } else if (status === 'zipping') {
+        progressText.textContent = 'Creating ZIP file...';
+        progressDetail.innerHTML = `<i class="bi bi-file-zip me-1"></i> Compressing ${total} files`;
+    } else if (status === 'complete') {
+        progressText.textContent = 'Download complete!';
+        progressDetail.innerHTML = `<i class="bi bi-check-circle me-1"></i> Successfully downloaded ${current} files`;
+        progressBar.classList.remove('progress-bar-animated');
+    } else if (status === 'batch-break') {
+        progressDetail.innerHTML = `<i class="bi bi-pause-circle me-1"></i> Waiting between batches...`;
+    } else if (status === 'super-break') {
+        progressDetail.innerHTML = `<i class="bi bi-clock-history me-1"></i> Taking a longer break to prevent timeouts...`;
+    }
+}
+
+async function downloadVoicemails() {
     const count = selectedVoicemails.length;
     if (count === 0) {
         alert('Please select at least one voicemail');
         return;
     }
 
-    // Show progress modal
-    document.getElementById('progressTotal').textContent = count;
-    document.getElementById('progressStatus').textContent = `Downloading ${count} voicemails... This may take several minutes. Please wait.`;
+    isDownloading = true;
+    document.getElementById('downloadBtn').disabled = true;
 
+    // Show progress modal
     const progressModal = new bootstrap.Modal(document.getElementById('progressModal'));
     progressModal.show();
 
-    // Disable buttons
-    document.getElementById('downloadSingleBtn').disabled = true;
-    document.getElementById('prepareBatchBtn').disabled = true;
+    // Reset progress bar
+    const progressBar = document.getElementById('progressBar');
+    progressBar.style.width = '0%';
+    progressBar.textContent = '0%';
+    progressBar.classList.add('progress-bar-animated');
 
-    // Submit download request
-    fetch('/download-bulk', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            voicemail_ids: selectedVoicemails
-        })
-    })
-    .then(response => {
-        // Check content type to determine if it's an error response
-        const contentType = response.headers.get('content-type') || '';
+    const zip = new JSZip();
+    let downloaded = 0;
+    let errors = [];
+    const totalBatches = Math.ceil(count / BATCH_SIZE);
+    let batchesSinceSuperBreak = 0;
 
-        if (contentType.includes('application/json')) {
-            // JSON response means error
-            return response.json().then(data => {
-                throw new Error(data.error || 'Download failed');
-            });
+    try {
+        // Process in batches
+        for (let batchStart = 0; batchStart < count; batchStart += BATCH_SIZE) {
+            const batchEnd = Math.min(batchStart + BATCH_SIZE, count);
+            const batch = selectedVoicemails.slice(batchStart, batchEnd);
+            const batchNum = Math.floor(batchStart / BATCH_SIZE) + 1;
+
+            // Super batch break
+            if (batchesSinceSuperBreak >= SUPER_BATCH_SIZE && batchNum > 1) {
+                updateProgress(downloaded, count, batchNum, totalBatches, 'super-break');
+                await sleep(SUPER_BATCH_DELAY);
+                batchesSinceSuperBreak = 0;
+            }
+
+            // Download each file in batch
+            for (let i = 0; i < batch.length; i++) {
+                const vm = batch[i];
+
+                try {
+                    updateProgress(downloaded, count, batchNum, totalBatches, 'downloading');
+
+                    // Fetch voicemail file
+                    const response = await fetch(`/download/${vm.id}`);
+
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}`);
+                    }
+
+                    const blob = await response.blob();
+                    zip.file(vm.filename, blob);
+                    downloaded++;
+
+                } catch (error) {
+                    console.error(`Failed to download ${vm.filename}:`, error);
+                    errors.push(`${vm.filename}: ${error.message}`);
+                }
+
+                // Delay between files (except last in batch)
+                if (i < batch.length - 1) {
+                    await sleep(FILE_DELAY);
+                }
+            }
+
+            batchesSinceSuperBreak++;
+
+            // Delay between batches
+            if (batchEnd < count) {
+                updateProgress(downloaded, count, batchNum + 1, totalBatches, 'batch-break');
+                await sleep(BATCH_DELAY);
+            }
         }
 
-        if (!response.ok) {
-            throw new Error('Download failed');
-        }
+        // Add metadata.json
+        const metadata = {
+            exported_by: '{{ user_info.get("name", "Unknown") }}',
+            exported_at: new Date().toISOString(),
+            total_voicemails: count,
+            downloaded: downloaded,
+            errors: errors
+        };
+        zip.file('metadata.json', JSON.stringify(metadata, null, 2));
 
-        return response.blob();
-    })
-    .then(blob => {
-        // Create download link
-        const url = window.URL.createObjectURL(blob);
+        // Generate ZIP
+        updateProgress(downloaded, count, totalBatches, totalBatches, 'zipping');
+
+        const zipBlob = await zip.generateAsync({
+            type: 'blob',
+            compression: 'DEFLATE',
+            compressionOptions: { level: 6 }
+        }, (meta) => {
+            // Update progress during ZIP generation
+            const zipPercent = Math.round(meta.percent);
+            document.getElementById('progressDetail').innerHTML =
+                `<i class="bi bi-file-zip me-1"></i> Compressing... ${zipPercent}%`;
+        });
+
+        // Trigger download
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+        const filename = `voicemails_${timestamp}.zip`;
+
+        const url = URL.createObjectURL(zipBlob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = 'voicemails_' + Date.now() + '.zip';
+        a.download = filename;
         document.body.appendChild(a);
         a.click();
-        window.URL.revokeObjectURL(url);
+        URL.revokeObjectURL(url);
         document.body.removeChild(a);
 
-        // Hide modal and re-enable buttons
-        progressModal.hide();
-        updateSelectedCount();
+        // Show completion
+        updateProgress(downloaded, count, totalBatches, totalBatches, 'complete');
 
-        // Show success message
-        alert(`Successfully downloaded ${count} voicemail(s)!`);
-    })
-    .catch(error => {
+        // Close modal after delay
+        setTimeout(() => {
+            progressModal.hide();
+
+            if (errors.length > 0) {
+                alert(`Downloaded ${downloaded}/${count} voicemails.\n\n${errors.length} files failed to download.`);
+            } else {
+                alert(`Successfully downloaded ${downloaded} voicemails!`);
+            }
+        }, 1500);
+
+    } catch (error) {
         console.error('Download error:', error);
         progressModal.hide();
-        updateSelectedCount();
         alert('Download failed: ' + error.message);
-    });
-}
-
-function prepareBatchDownloads() {
-    const count = selectedVoicemails.length;
-    if (count === 0) {
-        alert('Please select at least one voicemail');
-        return;
-    }
-
-    const numBatches = Math.ceil(count / BATCH_DOWNLOAD_SIZE);
-
-    // Show progress modal
-    document.getElementById('progressTotal').textContent = count;
-    document.getElementById('progressStatus').textContent = `Preparing ${numBatches} batch(es)... This will redirect you to the download page.`;
-
-    const progressModal = new bootstrap.Modal(document.getElementById('progressModal'));
-    progressModal.show();
-
-    // Disable buttons
-    document.getElementById('downloadSingleBtn').disabled = true;
-    document.getElementById('prepareBatchBtn').disabled = true;
-
-    // Submit batch preparation request
-    fetch('/download-prepare', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            voicemail_ids: selectedVoicemails
-        })
-    })
-    .then(response => {
-        if (!response.ok) {
-            throw new Error('Batch preparation failed');
-        }
-        return response.json();
-    })
-    .then(data => {
-        if (data.success) {
-            // Redirect to manifest page
-            window.location.href = `/download-manifest?manifest_id=${data.manifest_id}`;
-        } else {
-            throw new Error(data.error || 'Unknown error');
-        }
-    })
-    .catch(error => {
-        console.error('Batch preparation error:', error);
-        progressModal.hide();
+    } finally {
+        isDownloading = false;
         updateSelectedCount();
-        alert('Batch preparation failed: ' + error.message);
-    });
+    }
 }
 
 // Initialize

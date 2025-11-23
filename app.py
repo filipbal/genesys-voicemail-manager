@@ -38,8 +38,6 @@ from flask import (
     session, flash, send_file, jsonify, Response, stream_with_context
 )
 
-import zipstream
-
 # ============================================================================
 # FLASK APP CONFIGURATION
 # ============================================================================
@@ -1304,118 +1302,6 @@ def api_batch_status():
         'all_ready': all_ready,
         'any_failed': any_failed
     })
-
-
-@app.route('/download-bulk', methods=['POST'])
-@login_required
-def download_bulk():
-    """
-    Streaming bulk download - downloads voicemails and streams ZIP directly to client.
-    No temporary files, no disk I/O. Uses zipstream-ng for memory-efficient streaming.
-    """
-    # Check if downloads are enabled
-    if not ENABLE_DOWNLOADS:
-        return jsonify({'success': False, 'error': 'Download functionality is disabled'}), 403
-
-    access_token = session.get('access_token')
-    region_host = session.get('region_host')
-    user_info = session.get('user_info', {})
-
-    data = request.get_json()
-    if not data:
-        return jsonify({'success': False, 'error': 'No data provided'}), 400
-
-    voicemail_ids = data.get('voicemail_ids', [])
-
-    if not voicemail_ids:
-        return jsonify({'success': False, 'error': 'No voicemails selected'}), 400
-
-    # Get all voicemails to get metadata
-    all_voicemails, error = get_all_voicemails(access_token, region_host)
-    if error or not all_voicemails:
-        return jsonify({'success': False, 'error': f'Failed to fetch voicemails: {error}'}), 500
-
-    selected_vms = [vm for vm in all_voicemails if vm.get('id') in voicemail_ids]
-
-    if not selected_vms:
-        return jsonify({'success': False, 'error': 'No matching voicemails found'}), 400
-
-    user_name = user_info.get('name', 'Unknown').replace(' ', '_')
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    export_name = f"voicemails_{user_name}_{timestamp}"
-
-    def generate():
-        """Generator that yields ZIP chunks as voicemails are downloaded."""
-        zs = zipstream.ZipFile(mode='w', compression=zipstream.ZIP_DEFLATED)
-
-        downloaded = 0
-        errors = []
-        total_items = len(selected_vms)
-        batches_since_super_break = 0
-
-        app.logger.info(f"Starting streaming download of {total_items} voicemails")
-
-        # Download and add voicemails to ZIP stream
-        for batch_start in range(0, total_items, DOWNLOAD_BATCH_SIZE):
-            batch_end = min(batch_start + DOWNLOAD_BATCH_SIZE, total_items)
-            batch = selected_vms[batch_start:batch_end]
-            batch_num = (batch_start // DOWNLOAD_BATCH_SIZE) + 1
-
-            # Super batch break
-            if batches_since_super_break >= SUPER_BATCH_SIZE and batch_num > 1:
-                time.sleep(SUPER_BATCH_DELAY)
-                batches_since_super_break = 0
-
-            # Download batch
-            for idx, vm in enumerate(batch):
-                msg_id = vm.get('id')
-                filename = format_filename(vm)
-
-                media_bytes, dl_error = download_voicemail_media(access_token, region_host, msg_id)
-
-                if dl_error:
-                    errors.append(f"{filename}: {dl_error}")
-                else:
-                    # Add to ZIP stream in memory
-                    zs.write_iter(filename, [media_bytes])
-                    downloaded += 1
-
-                # Delay between downloads
-                if idx < len(batch) - 1:
-                    time.sleep(DOWNLOAD_OPERATION_DELAY)
-
-            batches_since_super_break += 1
-
-            # Delay between batches
-            if batch_end < total_items:
-                time.sleep(BATCH_DELAY)
-
-        # Add metadata.json to ZIP
-        metadata = {
-            'exported_by': user_info.get('name'),
-            'exported_at': datetime.now().isoformat(),
-            'total_voicemails': len(selected_vms),
-            'downloaded': downloaded,
-            'errors': errors
-        }
-        metadata_bytes = json.dumps(metadata, indent=2, default=str).encode('utf-8')
-        zs.write_iter('metadata.json', [metadata_bytes])
-
-        app.logger.info(f"Streaming download complete: {downloaded}/{total_items} voicemails")
-
-        # Yield ZIP chunks
-        for chunk in zs:
-            yield chunk
-
-    # Create response with streaming
-    response = Response(
-        stream_with_context(generate()),
-        mimetype='application/zip'
-    )
-    response.headers['Content-Disposition'] = f'attachment; filename="{export_name}.zip"'
-    response.headers['X-Accel-Buffering'] = 'no'  # Disable nginx buffering
-
-    return response
 
 
 @app.route('/forward')
