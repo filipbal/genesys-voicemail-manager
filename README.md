@@ -11,19 +11,19 @@ Genesys Cloud enforces user-level ownership on voicemail media—administrators 
 ### Voicemail Management
 - **View voicemails** - List all voicemails with caller info, date, duration, and read status
 - **Download individual** - Download single voicemail as WAV file
-- **Download all** - Export all voicemails as ZIP archive with metadata
+- **Download bulk** - Export multiple voicemails as ZIP archive with metadata
 - **Delete individual** - Remove single voicemail with confirmation
-- **Delete all** - Bulk delete all voicemails with confirmation
-- **Forward to user/group** - Forward voicemail to another Genesys user/group
+- **Delete bulk** - Batch delete multiple voicemails with confirmation
+- **Forward to user/group** - Forward voicemail to another Genesys user or group
 
 ## Security
 
 - **No password storage** - Authentication handled entirely by Genesys Cloud OAuth 2.0 with PKCE
-- **Token security** - Access tokens stored only in server-side sessions
+- **No file storage** - ZIP files created client-side in browser; voicemails never stored on server
+- **Token security** - Access tokens stored only in server-side sessions and cleared on logout
 - **User isolation** - Each user can only access their own voicemails
-- **HTTPS required** - All production traffic encrypted
+- **HTTPS required** - All traffic encrypted
 - **CSRF protection** - OAuth state parameter prevents cross-site request forgery
-- **Temporary files** - Downloaded files cleaned up automatically
 
 ## Supported Genesys Regions
 
@@ -33,8 +33,9 @@ Genesys Cloud enforces user-level ownership on voicemail media—administrators 
 
 ## Requirements
 
-- Python 3.8+
+- Python 3
 - Flask
+- Gunicorn (production)
 - Genesys Cloud OAuth Client (Code Authorization with PKCE)
 
 ### Environment Variables
@@ -53,7 +54,11 @@ Genesys Cloud enforces user-level ownership on voicemail media—administrators 
 |----------|--------|-------------|
 | `/` | GET | Home/login page |
 | `/dashboard` | GET | Voicemail dashboard |
+| `/download` | GET | Download page with selection UI |
+| `/forward` | GET | Forward page with selection UI |
+| `/delete` | GET | Delete page with selection UI |
 | `/logout` | GET | Clear session and logout |
+| `/documentation` | GET | Documentation page |
 
 ### OAuth
 
@@ -66,17 +71,19 @@ Genesys Cloud enforces user-level ownership on voicemail media—administrators 
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/voicemails` | GET | List all voicemails (JSON) |
-| `/download/<id>` | GET | Download single voicemail |
-| `/download-all` | GET | Download all as ZIP |
-| `/api/delete/<id>` | DELETE | Delete single voicemail |
-| `/api/delete-all` | DELETE | Delete all voicemails |
-| `/api/forward/<id>` | POST | Forward voicemail to user |
+| `/download/<id>` | GET | Download single voicemail as WAV |
+| `/download-bulk` | POST | Download multiple voicemails as ZIP (accepts JSON with voicemail_ids) |
+| `/api/forward` | POST | Forward voicemails (batch - accepts JSON with voicemail_ids, target_id, target_type) |
+| `/api/delete` | POST | Delete voicemails (batch - accepts JSON with voicemail_ids) |
 
-### Search
+**Note:** The application uses POST for batch operations to send JSON payloads. Internally, it makes the appropriate HTTP method calls (DELETE for deletes, POST for forwards) to the Genesys Cloud API.
+
+### API Endpoints (JSON)
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
+| `/api/voicemails` | GET | List all voicemails (JSON, paginated) |
+| `/api/voicemails/stats` | GET | Get voicemail statistics (JSON) |
 | `/api/search/users` | GET | Search users by name/email |
 | `/api/search/groups` | GET | Search groups by name |
 
@@ -85,6 +92,18 @@ Genesys Cloud enforces user-level ownership on voicemail media—administrators 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/health` | GET | Health check endpoint |
+
+### Genesys Cloud API Calls
+
+The application internally makes these calls to Genesys Cloud:
+
+| Genesys API Endpoint | Method | Description |
+|---------------------|--------|-------------|
+| `/api/v2/voicemail/messages` | POST | Forward/copy a voicemail |
+| `/api/v2/voicemail/messages/{messageId}` | DELETE | Delete a single voicemail |
+| `/api/v2/voicemail/me/messages` | GET | Get user's voicemails |
+| `/api/v2/users/search` | POST | Search users |
+| `/api/v2/groups/search` | POST | Search groups |
 
 ## Troubleshooting
 
@@ -105,6 +124,18 @@ Genesys Cloud enforces user-level ownership on voicemail media—administrators 
 
 ### Users or Groups not found when searching
 - Ensure `users:readonly` and `groups:readonly` scope is added to OAuth client
+
+## OAuth Scopes Required
+
+The Genesys OAuth client must have the following scopes:
+
+- `voicemail` - Read and manage voicemails
+- `users:readonly` - Search users for forwarding
+- `groups:readonly` - Search groups for forwarding
+
+## Production
+
+The application is configured for deployment on Render.
 
 ---
 

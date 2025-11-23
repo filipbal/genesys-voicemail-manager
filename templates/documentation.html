@@ -49,19 +49,12 @@
                 <ul>
                     <li><strong>View voicemails</strong> - List all voicemails with caller info, date, duration, and read status</li>
                     <li><strong>Download individual</strong> - Download single voicemail as WAV file</li>
-                    <li><strong>Download all</strong> - Export all voicemails as ZIP archive with metadata</li>
+                    <li><strong>Download bulk</strong> - Export multiple voicemails as ZIP archive with metadata</li>
                     <li><strong>Delete individual</strong> - Remove single voicemail with confirmation</li>
-                    <li><strong>Delete all</strong> - Bulk delete all voicemails with confirmation</li>
-                    <li><strong>Forward to user</strong> - Forward voicemail to another Genesys user</li>
+                    <li><strong>Delete bulk</strong> - Batch delete multiple voicemails with confirmation</li>
+                    <li><strong>Forward to user/group</strong> - Forward voicemail to another Genesys user or group</li>
                 </ul>
 
-                <h5 class="mt-4">User Interface</h5>
-                <ul>
-                    <li><strong>Responsive design</strong> - Works on desktop and mobile devices</li>
-                    <li><strong>Dark/Light mode</strong> - Theme toggle for user preference</li>
-                    <li><strong>Real-time feedback</strong> - Toast notifications for all actions</li>
-                    <li><strong>Bulk selection</strong> - Checkbox selection for batch operations</li>
-                </ul>
             </div>
         </div>
 
@@ -84,7 +77,8 @@
                         <div id="collapseLogin" class="accordion-collapse collapse show" data-bs-parent="#howToAccordion">
                             <div class="accordion-body">
                                 <ol>
-                                    <li>Click the <strong>"Login with Genesys Cloud"</strong> button on the home page</li>
+                                    <li>Select your Genesys Cloud region from the dropdown</li>
+                                    <li>Click the <strong>"Login with Genesys Cloud"</strong> button</li>
                                     <li>You will be redirected to Genesys Cloud login page</li>
                                     <li>Enter your Genesys credentials</li>
                                     <li>After successful authentication, you'll be redirected to your voicemail dashboard</li>
@@ -109,16 +103,24 @@
                             <div class="accordion-body">
                                 <h6>Individual Download:</h6>
                                 <ol>
-                                    <li>Find the voicemail you want to download</li>
+                                    <li>Find the voicemail you want to download on the dashboard</li>
                                     <li>Click the <strong>download icon</strong> <i class="bi bi-download"></i> next to it</li>
                                     <li>The WAV file will be downloaded to your computer</li>
                                 </ol>
                                 
-                                <h6 class="mt-3">Download All:</h6>
+                                <h6 class="mt-3">Bulk Download:</h6>
                                 <ol>
-                                    <li>Click the <strong>"Download All"</strong> button at the top of the dashboard</li>
-                                    <li>A ZIP file containing all voicemails and metadata will be downloaded</li>
+                                    <li>Click the <strong>"Download All"</strong> button on the dashboard</li>
+                                    <li>Select the voicemails you want to download (or select all)</li>
+                                    <li>Click <strong>"Download Selected"</strong></li>
+                                    <li>Wait for the download to complete - a progress indicator will show status</li>
+                                    <li>A ZIP file containing all selected voicemails and metadata will be downloaded</li>
                                 </ol>
+                                
+                                <div class="alert alert-warning small mb-0">
+                                    <i class="bi bi-clock me-2"></i>
+                                    Large downloads (500+ voicemails) may take 8-12 minutes. Please keep the window open during processing.
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -133,13 +135,25 @@
                         </h2>
                         <div id="collapseForward" class="accordion-collapse collapse" data-bs-parent="#howToAccordion">
                             <div class="accordion-body">
+                                <h6>Forward Single Voicemail:</h6>
                                 <ol>
-                                    <li>Click the <strong>forward icon</strong> <i class="bi bi-forward"></i> next to the voicemail</li>
+                                    <li>Click the <strong>forward icon</strong> <i class="bi bi-forward"></i> next to the voicemail on the dashboard</li>
                                     <li>A modal will appear with a search box</li>
-                                    <li>Type the name or email of the recipient user</li>
-                                    <li>Select the user from the search results</li>
+                                    <li>Choose to forward to a User or Group</li>
+                                    <li>Type the name or email of the recipient</li>
+                                    <li>Select the recipient from the search results</li>
                                     <li>Click <strong>"Forward"</strong> to send</li>
                                 </ol>
+                                
+                                <h6 class="mt-3">Bulk Forward:</h6>
+                                <ol>
+                                    <li>Click the <strong>"Forward All"</strong> button on the dashboard</li>
+                                    <li>Select a recipient (user or group)</li>
+                                    <li>Select the voicemails you want to forward</li>
+                                    <li>Click <strong>"Forward Selected"</strong></li>
+                                    <li>Wait for the operation to complete</li>
+                                </ol>
+                                
                                 <div class="alert alert-warning small mb-0">
                                     <i class="bi bi-exclamation-triangle me-2"></i>
                                     Forwarded voicemails will appear in the recipient's Genesys voicemail inbox.
@@ -158,17 +172,19 @@
                         </h2>
                         <div id="collapseDelete" class="accordion-collapse collapse" data-bs-parent="#howToAccordion">
                             <div class="accordion-body">
-                                <h6>Individual Delete:</h6>
+                                <h6>Delete Single Voicemail:</h6>
                                 <ol>
-                                    <li>Click the <strong>delete icon</strong> <i class="bi bi-trash text-danger"></i> next to the voicemail</li>
+                                    <li>Click the <strong>delete icon</strong> <i class="bi bi-trash text-danger"></i> next to the voicemail on the dashboard</li>
                                     <li>Confirm the deletion in the popup dialog</li>
                                 </ol>
                                 
-                                <h6 class="mt-3">Delete All:</h6>
+                                <h6 class="mt-3">Bulk Delete:</h6>
                                 <ol>
-                                    <li>Click the <strong>"Delete All"</strong> button at the top of the dashboard</li>
+                                    <li>Click the <strong>"Delete All"</strong> button on the dashboard</li>
+                                    <li>Select the voicemails you want to delete</li>
+                                    <li>Click <strong>"Delete Selected"</strong></li>
                                     <li>Read the warning carefully</li>
-                                    <li>Confirm to delete all voicemails</li>
+                                    <li>Confirm to delete the selected voicemails</li>
                                 </ol>
                                 
                                 <div class="alert alert-danger small mb-0">
@@ -190,12 +206,12 @@
             </div>
             <div class="card-body">
                 <ul class="mb-0">
-                    <li><strong>No password storage</strong> - Authentication handled entirely by Genesys Cloud OAuth</li>
-                    <li><strong>Token security</strong> - Access tokens stored only in server-side sessions</li>
+                    <li><strong>No password storage</strong> - Authentication handled entirely by Genesys Cloud OAuth 2.0 with PKCE</li>
+					<li><strong>No file storage</strong> - ZIP files created client-side in browser; voicemails never stored on server</li>
+                    <li><strong>Token security</strong> - Access tokens stored only in server-side sessions and cleared on logout</li>
                     <li><strong>User isolation</strong> - Each user can only access their own voicemails</li>
                     <li><strong>HTTPS required</strong> - All traffic encrypted</li>
                     <li><strong>CSRF protection</strong> - OAuth state parameter prevents cross-site request forgery</li>
-                    <li><strong>Temporary files</strong> - Downloaded files cleaned up automatically</li>
                 </ul>
             </div>
         </div>
@@ -229,11 +245,15 @@
                             </tr>
                             <tr>
                                 <td>Forward not working</td>
-                                <td>Ensure the recipient user exists and has voicemail enabled.</td>
+                                <td>Ensure the recipient user/group exists and has voicemail enabled.</td>
                             </tr>
                             <tr>
                                 <td>Session expired</td>
                                 <td>Log out and log back in to get a fresh token.</td>
+                            </tr>
+                            <tr>
+                                <td>Download/Forward/Delete taking too long</td>
+                                <td>Large operations are processed in batches. Keep the window open and wait for completion.</td>
                             </tr>
                         </tbody>
                     </table>
@@ -241,13 +261,131 @@
             </div>
         </div>
 
-        <!-- API Reference (for advanced users) -->
+        <!-- API Reference -->
         <div class="card mb-4">
             <div class="card-header">
                 <h4 class="mb-0"><i class="bi bi-code-slash me-2"></i>API Endpoints</h4>
             </div>
             <div class="card-body">
                 <p class="text-muted small">For developers and advanced users.</p>
+                
+                <div class="alert alert-info small">
+                    <i class="bi bi-info-circle me-2"></i>
+                    <strong>Note:</strong> The application uses POST for batch operations to send JSON payloads with voicemail IDs. 
+                    Internally, it makes the appropriate HTTP method calls (DELETE, POST) to the Genesys Cloud API.
+                </div>
+                
+                <h6 class="mt-3">Pages</h6>
+                <div class="table-responsive">
+                    <table class="table table-sm">
+                        <thead>
+                            <tr>
+                                <th>Endpoint</th>
+                                <th>Method</th>
+                                <th>Description</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><code>/</code></td>
+                                <td><span class="badge bg-success">GET</span></td>
+                                <td>Home/login page</td>
+                            </tr>
+                            <tr>
+                                <td><code>/dashboard</code></td>
+                                <td><span class="badge bg-success">GET</span></td>
+                                <td>Voicemail dashboard</td>
+                            </tr>
+                            <tr>
+                                <td><code>/download</code></td>
+                                <td><span class="badge bg-success">GET</span></td>
+                                <td>Download page with selection UI</td>
+                            </tr>
+                            <tr>
+                                <td><code>/forward</code></td>
+                                <td><span class="badge bg-success">GET</span></td>
+                                <td>Forward page with selection UI</td>
+                            </tr>
+                            <tr>
+                                <td><code>/delete</code></td>
+                                <td><span class="badge bg-success">GET</span></td>
+                                <td>Delete page with selection UI</td>
+                            </tr>
+                            <tr>
+                                <td><code>/logout</code></td>
+                                <td><span class="badge bg-success">GET</span></td>
+                                <td>Clear session and logout</td>
+                            </tr>
+                            <tr>
+                                <td><code>/documentation</code></td>
+                                <td><span class="badge bg-success">GET</span></td>
+                                <td>Documentation page</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <h6 class="mt-3">OAuth</h6>
+                <div class="table-responsive">
+                    <table class="table table-sm">
+                        <thead>
+                            <tr>
+                                <th>Endpoint</th>
+                                <th>Method</th>
+                                <th>Description</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><code>/login</code></td>
+                                <td><span class="badge bg-warning text-dark">POST</span></td>
+                                <td>Initiate OAuth flow</td>
+                            </tr>
+                            <tr>
+                                <td><code>/callback</code></td>
+                                <td><span class="badge bg-success">GET</span></td>
+                                <td>OAuth callback handler</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <h6 class="mt-3">Voicemail Operations</h6>
+                <div class="table-responsive">
+                    <table class="table table-sm">
+                        <thead>
+                            <tr>
+                                <th>Endpoint</th>
+                                <th>Method</th>
+                                <th>Description</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><code>/download/&lt;message_id&gt;</code></td>
+                                <td><span class="badge bg-success">GET</span></td>
+                                <td>Download single voicemail as WAV</td>
+                            </tr>
+                            <tr>
+                                <td><code>/download-bulk</code></td>
+                                <td><span class="badge bg-warning text-dark">POST</span></td>
+                                <td>Download multiple voicemails as ZIP (accepts JSON payload with voicemail_ids)</td>
+                            </tr>
+                            <tr>
+                                <td><code>/api/forward</code></td>
+                                <td><span class="badge bg-warning text-dark">POST</span></td>
+                                <td>Forward voicemails (batch - accepts JSON payload with voicemail_ids, target_id, target_type)</td>
+                            </tr>
+                            <tr>
+                                <td><code>/api/delete</code></td>
+                                <td><span class="badge bg-warning text-dark">POST</span></td>
+                                <td>Delete voicemails (batch - accepts JSON payload with voicemail_ids)</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <h6 class="mt-3">API Endpoints (JSON)</h6>
                 <div class="table-responsive">
                     <table class="table table-sm">
                         <thead>
@@ -261,42 +399,83 @@
                             <tr>
                                 <td><code>/api/voicemails</code></td>
                                 <td><span class="badge bg-success">GET</span></td>
-                                <td>List all voicemails (JSON)</td>
+                                <td>List all voicemails (JSON, paginated)</td>
                             </tr>
                             <tr>
-                                <td><code>/download/&lt;id&gt;</code></td>
+                                <td><code>/api/voicemails/stats</code></td>
                                 <td><span class="badge bg-success">GET</span></td>
-                                <td>Download single voicemail</td>
-                            </tr>
-                            <tr>
-                                <td><code>/download-all</code></td>
-                                <td><span class="badge bg-success">GET</span></td>
-                                <td>Download all as ZIP</td>
-                            </tr>
-                            <tr>
-                                <td><code>/api/delete/&lt;id&gt;</code></td>
-                                <td><span class="badge bg-danger">DELETE</span></td>
-                                <td>Delete single voicemail</td>
-                            </tr>
-                            <tr>
-                                <td><code>/api/delete-all</code></td>
-                                <td><span class="badge bg-danger">DELETE</span></td>
-                                <td>Delete all voicemails</td>
-                            </tr>
-                            <tr>
-                                <td><code>/api/forward/&lt;id&gt;</code></td>
-                                <td><span class="badge bg-primary">POST</span></td>
-                                <td>Forward voicemail</td>
+                                <td>Get voicemail statistics (JSON)</td>
                             </tr>
                             <tr>
                                 <td><code>/api/search/users</code></td>
                                 <td><span class="badge bg-success">GET</span></td>
-                                <td>Search users</td>
+                                <td>Search users by name/email</td>
                             </tr>
+                            <tr>
+                                <td><code>/api/search/groups</code></td>
+                                <td><span class="badge bg-success">GET</span></td>
+                                <td>Search groups by name</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <h6 class="mt-3">Utility</h6>
+                <div class="table-responsive">
+                    <table class="table table-sm">
+                        <thead>
+                            <tr>
+                                <th>Endpoint</th>
+                                <th>Method</th>
+                                <th>Description</th>
+                            </tr>
+                        </thead>
+                        <tbody>
                             <tr>
                                 <td><code>/health</code></td>
                                 <td><span class="badge bg-success">GET</span></td>
-                                <td>Health check</td>
+                                <td>Health check endpoint</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <h6 class="mt-4">Genesys Cloud API Calls</h6>
+                <p class="small text-muted">The application internally makes these calls to Genesys Cloud API:</p>
+                <div class="table-responsive">
+                    <table class="table table-sm">
+                        <thead>
+                            <tr>
+                                <th>Genesys API</th>
+                                <th>Method</th>
+                                <th>Description</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><code>/api/v2/voicemail/messages</code></td>
+                                <td><span class="badge bg-warning text-dark">POST</span></td>
+                                <td>Forward/copy a voicemail</td>
+                            </tr>
+                            <tr>
+                                <td><code>/api/v2/voicemail/messages/{messageId}</code></td>
+                                <td><span class="badge bg-danger">DELETE</span></td>
+                                <td>Delete a single voicemail</td>
+                            </tr>
+                            <tr>
+                                <td><code>/api/v2/voicemail/me/messages</code></td>
+                                <td><span class="badge bg-success">GET</span></td>
+                                <td>Get user's voicemails</td>
+                            </tr>
+                            <tr>
+                                <td><code>/api/v2/users/search</code></td>
+                                <td><span class="badge bg-warning text-dark">POST</span></td>
+                                <td>Search users</td>
+                            </tr>
+                            <tr>
+                                <td><code>/api/v2/groups/search</code></td>
+                                <td><span class="badge bg-warning text-dark">POST</span></td>
+                                <td>Search groups</td>
                             </tr>
                         </tbody>
                     </table>
