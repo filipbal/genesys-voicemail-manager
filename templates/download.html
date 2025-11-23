@@ -140,56 +140,24 @@
                     </div>
                 </div>
                 <p class="text-center mb-2">
-                    Downloaded <strong id="progressDownloaded">0</strong> of <strong id="progressTotal">0</strong> voicemails
-                    <span id="progressPercent" class="text-muted">(0%)</span>
+                    Downloading <strong id="progressTotal">0</strong> voicemails...
                 </p>
-                <div class="progress mb-3" style="height: 25px;">
-                    <div class="progress-bar bg-success progress-bar-striped progress-bar-animated" 
-                         role="progressbar" style="width: 0%;" id="progressBar">
-                        0%
-                    </div>
-                </div>
                 <p class="text-center text-muted small mb-0">
                     <i class="bi bi-info-circle me-1"></i>
-                    <span id="progressStatus">Preparing download...</span>
+                    <span id="progressStatus">This may take several minutes for large downloads. Please wait...</span>
                 </p>
             </div>
         </div>
     </div>
 </div>
 
-<!-- Results Modal -->
-<div class="modal fade" id="resultsModal" tabindex="-1" data-bs-backdrop="static">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header" id="resultsHeader">
-                <h5 class="modal-title" id="resultsTitle">
-                    <i class="bi bi-check-circle text-success me-2"></i>
-                    Download Complete
-                </h5>
-            </div>
-            <div class="modal-body" id="resultsBody">
-                <!-- Results will be populated here -->
-            </div>
-            <div class="modal-footer">
-                <a href="{{ url_for('dashboard') }}" class="btn btn-secondary">
-                    <i class="bi bi-arrow-left me-1"></i> Back to Dashboard
-                </a>
-                <button type="button" class="btn btn-success" id="downloadZipBtn" style="display: none;">
-                    <i class="bi bi-file-earmark-zip me-1"></i> Download ZIP File
-                </button>
-            </div>
-        </div>
-    </div>
-</div>
+<!-- Remove Results Modal - not needed with simple download -->
 {% endblock %}
 
 {% block extra_js %}
 <script>
 const BATCH_SIZE = {{ batch_size }};
 let selectedVoicemails = [];
-let eventSource = null;
-let progressId = null;
 
 // Voicemail selection handlers
 document.querySelectorAll('.voicemail-checkbox').forEach(checkbox => {
@@ -248,13 +216,9 @@ function downloadVoicemails() {
         return;
     }
     
-    // Initialize progress modal
+    // Show progress modal
     document.getElementById('progressTotal').textContent = count;
-    document.getElementById('progressDownloaded').textContent = '0';
-    document.getElementById('progressPercent').textContent = '(0%)';
-    document.getElementById('progressBar').style.width = '0%';
-    document.getElementById('progressBar').textContent = '0%';
-    document.getElementById('progressStatus').textContent = 'Preparing download...';
+    document.getElementById('progressStatus').textContent = `Downloading ${count} voicemails... This may take several minutes. Please wait.`;
     
     const progressModal = new bootstrap.Modal(document.getElementById('progressModal'));
     progressModal.show();
@@ -263,154 +227,44 @@ function downloadVoicemails() {
     const btn = document.getElementById('downloadBtn');
     btn.disabled = true;
     
-    // Start bulk download
-    fetch('/api/download-bulk', {
+    // Submit download request
+    fetch('/download-bulk', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
             voicemail_ids: selectedVoicemails
         })
     })
-    .then(response => response.json())
-    .then(data => {
-        if (!data.success) {
-            throw new Error(data.error || 'Failed to start download');
+    .then(response => {
+        if (!response.ok) {
+            throw new Error('Download failed');
         }
+        return response.blob();
+    })
+    .then(blob => {
+        // Create download link
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'voicemails_' + Date.now() + '.zip';
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
         
-        progressId = data.progress_id;
+        // Hide modal
+        progressModal.hide();
+        btn.disabled = false;
         
-        // Start listening to progress via SSE
-        const voicemailIdsParam = selectedVoicemails.join(',');
-        eventSource = new EventSource(`/api/download-progress/${progressId}?voicemail_ids=${voicemailIdsParam}`);
-        
-        eventSource.onmessage = function(event) {
-            const data = JSON.parse(event.data);
-            
-            if (data.error) {
-                console.error('Download error:', data.error);
-                eventSource.close();
-                showError(data.error);
-                return;
-            }
-            
-            // Update progress
-            if (data.progress !== undefined) {
-                const progress = Math.min(data.progress, 100);
-                document.getElementById('progressBar').style.width = progress + '%';
-                document.getElementById('progressBar').textContent = progress + '%';
-                
-                if (data.processed !== undefined) {
-                    document.getElementById('progressDownloaded').textContent = data.downloaded || data.processed;
-                    document.getElementById('progressPercent').textContent = `(${progress}%)`;
-                }
-                
-                if (data.status === 'zipping') {
-                    document.getElementById('progressStatus').textContent = 'Creating ZIP file...';
-                } else if (data.status === 'complete') {
-                    document.getElementById('progressStatus').textContent = 'Download complete!';
-                } else {
-                    document.getElementById('progressStatus').textContent = 'Downloading files...';
-                }
-            }
-            
-            // Handle completion
-            if (data.status === 'complete') {
-                eventSource.close();
-                
-                setTimeout(() => {
-                    progressModal.hide();
-                    showResults(data);
-                    btn.disabled = false;
-                }, 500);
-            }
-        };
-        
-        eventSource.onerror = function(error) {
-            console.error('SSE Error:', error);
-            eventSource.close();
-            progressModal.hide();
-            btn.disabled = false;
-            alert('An error occurred during download. Please try again.');
-        };
+        // Show success message
+        alert(`Successfully downloaded ${count} voicemail(s)!`);
     })
     .catch(error => {
         console.error('Download error:', error);
         progressModal.hide();
         btn.disabled = false;
-        alert('Failed to start download: ' + error.message);
+        alert('Download failed. Please try again or select fewer voicemails.');
     });
-}
-
-function showResults(data) {
-    const resultsBody = document.getElementById('resultsBody');
-    const resultsHeader = document.getElementById('resultsHeader');
-    const resultsTitle = document.getElementById('resultsTitle');
-    const downloadZipBtn = document.getElementById('downloadZipBtn');
-    
-    const downloaded = data.downloaded || 0;
-    const failed = data.failed || 0;
-    const total = downloaded + failed;
-    
-    let html = '';
-    
-    if (failed === 0) {
-        resultsHeader.className = 'modal-header bg-success text-white';
-        resultsTitle.innerHTML = '<i class="bi bi-check-circle me-2"></i>Download Complete';
-        html = `
-            <div class="text-center mb-3">
-                <i class="bi bi-check-circle text-success" style="font-size: 4rem;"></i>
-            </div>
-            <p class="text-center">
-                Successfully downloaded <strong>${downloaded}</strong> voicemail${downloaded !== 1 ? 's' : ''}.
-            </p>
-            <p class="text-center">
-                Click the button below to download your ZIP file.
-            </p>
-        `;
-        
-        // Show download button
-        downloadZipBtn.style.display = 'inline-block';
-        downloadZipBtn.onclick = function() {
-            window.location.href = `/api/download-file/${progressId}`;
-        };
-    } else {
-        resultsHeader.className = 'modal-header bg-warning';
-        resultsTitle.innerHTML = '<i class="bi bi-exclamation-triangle me-2"></i>Partial Success';
-        html = `
-            <div class="text-center mb-3">
-                <i class="bi bi-exclamation-triangle text-warning" style="font-size: 4rem;"></i>
-            </div>
-            <p class="text-center">
-                Downloaded <strong>${downloaded}</strong> of <strong>${total}</strong> voicemail${total !== 1 ? 's' : ''}.
-                <br>
-                <span class="text-danger">Failed: ${failed}</span>
-            </p>
-        `;
-        
-        if (downloaded > 0) {
-            html += `<p class="text-center">Click the button below to download the available files.</p>`;
-            downloadZipBtn.style.display = 'inline-block';
-            downloadZipBtn.onclick = function() {
-                window.location.href = `/api/download-file/${progressId}`;
-            };
-        }
-    }
-    
-    resultsBody.innerHTML = html;
-    
-    // Show modal
-    const modal = new bootstrap.Modal(document.getElementById('resultsModal'));
-    modal.show();
-}
-
-function showError(message) {
-    const progressModal = bootstrap.Modal.getInstance(document.getElementById('progressModal'));
-    if (progressModal) {
-        progressModal.hide();
-    }
-    
-    alert('Download error: ' + message);
-    document.getElementById('downloadBtn').disabled = false;
 }
 
 // Initialize
