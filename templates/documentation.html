@@ -49,10 +49,11 @@
                 <ul>
                     <li><strong>View voicemails</strong> - List all voicemails with caller info, date, duration, and read status</li>
                     <li><strong>Download individual</strong> - Download single voicemail as WAV file</li>
-                    <li><strong>Download all</strong> - Export all voicemails as ZIP archive with metadata</li>
+                    <li><strong>Download all</strong> - Export all voicemails as ZIP with client-side processing</li>
+                    <li><strong>Batch downloads</strong> - Smart batching with progress tracking to prevent API throttling</li>
                     <li><strong>Delete individual</strong> - Remove single voicemail with confirmation</li>
-                    <li><strong>Delete all</strong> - Bulk delete all voicemails with confirmation</li>
-                    <li><strong>Forward to user</strong> - Forward voicemail to another Genesys user</li>
+                    <li><strong>Bulk delete</strong> - Delete selected or all voicemails with progress tracking</li>
+                    <li><strong>Forward to user/group</strong> - Forward voicemail to another Genesys user or group</li>
                 </ul>
 
                 <h5 class="mt-4">User Interface</h5>
@@ -190,12 +191,12 @@
             </div>
             <div class="card-body">
                 <ul class="mb-0">
-                    <li><strong>No password storage</strong> - Authentication handled entirely by Genesys Cloud OAuth</li>
+                    <li><strong>No password storage</strong> - Authentication handled entirely by Genesys Cloud OAuth 2.0 with PKCE</li>
                     <li><strong>Token security</strong> - Access tokens stored only in server-side sessions</li>
                     <li><strong>User isolation</strong> - Each user can only access their own voicemails</li>
+                    <li><strong>No server storage</strong> - ZIP files created client-side in browser; voicemails never stored on server</li>
                     <li><strong>HTTPS required</strong> - All traffic encrypted</li>
                     <li><strong>CSRF protection</strong> - OAuth state parameter prevents cross-site request forgery</li>
-                    <li><strong>Temporary files</strong> - Downloaded files cleaned up automatically</li>
                 </ul>
             </div>
         </div>
@@ -266,12 +267,7 @@
                             <tr>
                                 <td><code>/download/&lt;id&gt;</code></td>
                                 <td><span class="badge bg-success">GET</span></td>
-                                <td>Download single voicemail</td>
-                            </tr>
-                            <tr>
-                                <td><code>/download-all</code></td>
-                                <td><span class="badge bg-success">GET</span></td>
-                                <td>Download all as ZIP</td>
+                                <td>Download single voicemail (proxy)</td>
                             </tr>
                             <tr>
                                 <td><code>/api/delete/&lt;id&gt;</code></td>
@@ -279,19 +275,29 @@
                                 <td>Delete single voicemail</td>
                             </tr>
                             <tr>
-                                <td><code>/api/delete-all</code></td>
-                                <td><span class="badge bg-danger">DELETE</span></td>
-                                <td>Delete all voicemails</td>
+                                <td><code>/api/delete-selected</code></td>
+                                <td><span class="badge bg-danger">POST</span></td>
+                                <td>Delete selected voicemails</td>
                             </tr>
                             <tr>
                                 <td><code>/api/forward/&lt;id&gt;</code></td>
-                                <td><span class="badge bg-primary">POST</span></td>
-                                <td>Forward voicemail</td>
+                                <td><span class="badge bg-warning text-dark">POST</span></td>
+                                <td>Forward voicemail to user/group</td>
+                            </tr>
+                            <tr>
+                                <td><code>/api/forward-selected</code></td>
+                                <td><span class="badge bg-warning text-dark">POST</span></td>
+                                <td>Forward selected voicemails</td>
                             </tr>
                             <tr>
                                 <td><code>/api/search/users</code></td>
                                 <td><span class="badge bg-success">GET</span></td>
-                                <td>Search users</td>
+                                <td>Search users by name/email</td>
+                            </tr>
+                            <tr>
+                                <td><code>/api/search/groups</code></td>
+                                <td><span class="badge bg-success">GET</span></td>
+                                <td>Search groups by name</td>
                             </tr>
                             <tr>
                                 <td><code>/health</code></td>

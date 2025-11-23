@@ -11,25 +11,26 @@ Genesys Cloud enforces user-level ownership on voicemail media—administrators 
 ### Voicemail Management
 - **View voicemails** - List all voicemails with caller info, date, duration, and read status
 - **Download individual** - Download single voicemail as WAV file
-- **Download all** - Export all voicemails as ZIP archive with metadata
+- **Download all** - Export all voicemails as ZIP archive with client-side processing
+- **Batch downloads** - Smart batching with progress tracking and delays to prevent API throttling
 - **Delete individual** - Remove single voicemail with confirmation
-- **Delete all** - Bulk delete all voicemails with confirmation
-- **Forward to user/group** - Forward voicemail to another Genesys user/group
+- **Bulk delete** - Delete selected or all voicemails with progress tracking
+- **Forward to user/group** - Forward voicemail to another Genesys user or group
+
+### User Interface
+- **Responsive design** - Works on desktop and mobile devices
+- **Color-coded actions** - Green (download), amber (forward), red (delete)
+- **Real-time feedback** - Toast notifications for all actions
+- **Bulk selection** - Checkbox selection for batch operations
 
 ## Security
 
 - **No password storage** - Authentication handled entirely by Genesys Cloud OAuth 2.0 with PKCE
 - **Token security** - Access tokens stored only in server-side sessions
 - **User isolation** - Each user can only access their own voicemails
+- **No server storage** - ZIP files created client-side in browser; voicemails never stored on server
 - **HTTPS required** - All production traffic encrypted
 - **CSRF protection** - OAuth state parameter prevents cross-site request forgery
-- **Temporary files** - Downloaded files cleaned up automatically
-
-## Supported Genesys Regions
-
-| Region | Host |
-|--------|------|
-| US West | usw2.pure.cloud |
 
 ## Requirements
 
@@ -53,6 +54,10 @@ Genesys Cloud enforces user-level ownership on voicemail media—administrators 
 |----------|--------|-------------|
 | `/` | GET | Home/login page |
 | `/dashboard` | GET | Voicemail dashboard |
+| `/download` | GET | Download page |
+| `/forward` | GET | Forward page |
+| `/delete` | GET | Delete page |
+| `/documentation` | GET | User documentation |
 | `/logout` | GET | Clear session and logout |
 
 ### OAuth
@@ -67,11 +72,11 @@ Genesys Cloud enforces user-level ownership on voicemail media—administrators 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/api/voicemails` | GET | List all voicemails (JSON) |
-| `/download/<id>` | GET | Download single voicemail |
-| `/download-all` | GET | Download all as ZIP |
+| `/download/<id>` | GET | Download single voicemail (proxy) |
 | `/api/delete/<id>` | DELETE | Delete single voicemail |
-| `/api/delete-all` | DELETE | Delete all voicemails |
-| `/api/forward/<id>` | POST | Forward voicemail to user |
+| `/api/delete-selected` | POST | Delete selected voicemails |
+| `/api/forward/<id>` | POST | Forward voicemail to user/group |
+| `/api/forward-selected` | POST | Forward selected voicemails |
 
 ### Search
 
