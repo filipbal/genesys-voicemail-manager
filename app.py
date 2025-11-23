@@ -77,7 +77,7 @@ API_PAGE_SIZE = 50  # Max items per API page (Genesys limit for /me/messages)
 DISPLAY_PAGE_SIZE = 50  # Items per UI page
 
 # Batch processing settings
-BATCH_SIZE = 20
+BATCH_SIZE = 25
 BATCH_DELAY = 3.0
 OPERATION_DELAY = 0.2
 RATE_LIMIT_BACKOFF = 10.0
