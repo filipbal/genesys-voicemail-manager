@@ -1,0 +1,247 @@
+{% extends "base.html" %}
+
+{% block title %}Download Batches - Voicemail Manager{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <!-- User Info Banner -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card bg-success text-white">
+                <div class="card-body py-3">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <h5 class="mb-1">
+                                <i class="bi bi-person-circle me-2"></i>
+                                {{ user_info.get('name', 'User') }}
+                            </h5>
+                            <small>Region: {{ region.get('name', 'Unknown') }}</small>
+                        </div>
+                        <a href="{{ url_for('download_page') }}" class="btn btn-outline-light btn-sm">
+                            <i class="bi bi-arrow-left me-1"></i> Back to Download
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Info Alert -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="alert alert-info d-flex align-items-center" role="alert">
+                <i class="bi bi-info-circle-fill me-2 fs-5"></i>
+                <div>
+                    <strong>Batch Downloads Ready</strong><br>
+                    Your {{ total_voicemails }} voicemails have been split into {{ batches|length }} batches of up to 50 each.
+                    Click each button to download. Links expire in <strong>{{ expiry_minutes }} minutes</strong>.
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Download Batches Card -->
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">
+                        <i class="bi bi-collection me-2"></i>
+                        Download Batches
+                    </h5>
+                    <span class="badge bg-primary" id="status-badge">
+                        Preparing...
+                    </span>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-hover">
+                            <thead>
+                                <tr>
+                                    <th>Batch</th>
+                                    <th>Voicemails</th>
+                                    <th>Status</th>
+                                    <th>Downloaded</th>
+                                    <th class="text-end">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="batches-table">
+                                {% for batch in batches %}
+                                <tr id="batch-row-{{ batch.id }}">
+                                    <td>
+                                        <strong>Batch {{ batch.batch_num }} of {{ batch.total_batches }}</strong>
+                                    </td>
+                                    <td>{{ batch.total }} voicemails</td>
+                                    <td>
+                                        <span class="status-cell" id="status-{{ batch.id }}">
+                                            {% if batch.status == 'ready' %}
+                                            <span class="badge bg-success">
+                                                <i class="bi bi-check-circle me-1"></i>Ready
+                                            </span>
+                                            {% elif batch.status == 'failed' %}
+                                            <span class="badge bg-danger">
+                                                <i class="bi bi-x-circle me-1"></i>Failed
+                                            </span>
+                                            {% else %}
+                                            <span class="badge bg-warning text-dark">
+                                                <i class="bi bi-hourglass-split me-1"></i>Preparing...
+                                            </span>
+                                            {% endif %}
+                                        </span>
+                                    </td>
+                                    <td id="downloaded-{{ batch.id }}">
+                                        {% if batch.status == 'ready' %}
+                                        {{ batch.downloaded }}/{{ batch.total }}
+                                        {% if batch.errors > 0 %}
+                                        <span class="text-warning">({{ batch.errors }} errors)</span>
+                                        {% endif %}
+                                        {% else %}
+                                        -
+                                        {% endif %}
+                                    </td>
+                                    <td class="text-end">
+                                        <a href="{{ url_for('download_batch', batch_id=batch.id) }}"
+                                           class="btn btn-primary btn-sm download-btn"
+                                           id="btn-{{ batch.id }}"
+                                           {% if batch.status != 'ready' %}disabled{% endif %}>
+                                            <i class="bi bi-download me-1"></i>
+                                            Download ZIP
+                                        </a>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="card-footer">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <small class="text-muted">
+                            <i class="bi bi-clock me-1"></i>
+                            Links expire in {{ expiry_minutes }} minutes
+                        </small>
+                        <button class="btn btn-outline-secondary btn-sm" onclick="downloadAll()" id="download-all-btn" disabled>
+                            <i class="bi bi-cloud-download me-1"></i>
+                            Download All Batches
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Progress Summary -->
+    <div class="row mt-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-body">
+                    <div class="row text-center">
+                        <div class="col-md-4">
+                            <h3 id="total-batches">{{ batches|length }}</h3>
+                            <small class="text-muted">Total Batches</small>
+                        </div>
+                        <div class="col-md-4">
+                            <h3 id="ready-count">0</h3>
+                            <small class="text-muted">Ready</small>
+                        </div>
+                        <div class="col-md-4">
+                            <h3 id="total-vms">{{ total_voicemails }}</h3>
+                            <small class="text-muted">Voicemails</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+const manifestId = "{{ manifest_id }}";
+let pollingInterval;
+let allReady = false;
+
+function updateBatchStatus() {
+    fetch(`/api/batch-status?manifest_id=${manifestId}`)
+        .then(response => response.json())
+        .then(data => {
+            let readyCount = 0;
+
+            data.batches.forEach(batch => {
+                const statusCell = document.getElementById(`status-${batch.id}`);
+                const downloadedCell = document.getElementById(`downloaded-${batch.id}`);
+                const btn = document.getElementById(`btn-${batch.id}`);
+
+                if (batch.status === 'ready') {
+                    readyCount++;
+                    statusCell.innerHTML = '<span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Ready</span>';
+                    downloadedCell.textContent = `${batch.downloaded}/${batch.total}`;
+                    if (batch.errors > 0) {
+                        downloadedCell.innerHTML += ` <span class="text-warning">(${batch.errors} errors)</span>`;
+                    }
+                    btn.removeAttribute('disabled');
+                    btn.classList.remove('btn-secondary');
+                    btn.classList.add('btn-primary');
+                } else if (batch.status === 'failed') {
+                    statusCell.innerHTML = '<span class="badge bg-danger"><i class="bi bi-x-circle me-1"></i>Failed</span>';
+                    btn.setAttribute('disabled', 'disabled');
+                    btn.classList.remove('btn-primary');
+                    btn.classList.add('btn-danger');
+                } else {
+                    statusCell.innerHTML = '<span class="badge bg-warning text-dark"><i class="bi bi-hourglass-split me-1"></i>Preparing...</span>';
+                }
+            });
+
+            document.getElementById('ready-count').textContent = readyCount;
+
+            if (data.all_ready) {
+                allReady = true;
+                document.getElementById('status-badge').className = 'badge bg-success';
+                document.getElementById('status-badge').textContent = 'All Ready';
+                document.getElementById('download-all-btn').removeAttribute('disabled');
+                clearInterval(pollingInterval);
+            } else if (data.any_failed) {
+                document.getElementById('status-badge').className = 'badge bg-warning text-dark';
+                document.getElementById('status-badge').textContent = 'Some Failed';
+            } else {
+                document.getElementById('status-badge').className = 'badge bg-primary';
+                document.getElementById('status-badge').textContent = `${readyCount}/${data.batches.length} Ready`;
+            }
+        })
+        .catch(error => {
+            console.error('Error fetching batch status:', error);
+        });
+}
+
+function downloadAll() {
+    const buttons = document.querySelectorAll('.download-btn:not([disabled])');
+    let delay = 0;
+
+    buttons.forEach(btn => {
+        setTimeout(() => {
+            btn.click();
+        }, delay);
+        delay += 500; // 500ms between each download
+    });
+}
+
+// Start polling for status updates
+document.addEventListener('DOMContentLoaded', function() {
+    updateBatchStatus();
+    pollingInterval = setInterval(updateBatchStatus, 2000); // Poll every 2 seconds
+});
+
+// Clean up on page leave
+window.addEventListener('beforeunload', function() {
+    if (pollingInterval) {
+        clearInterval(pollingInterval);
+    }
+});
+</script>
+
+<style>
+.download-btn[disabled] {
+    pointer-events: none;
+    opacity: 0.6;
+}
+</style>
+{% endblock %}

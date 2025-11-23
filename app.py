@@ -27,6 +27,8 @@ import tempfile
 import shutil
 import zipfile
 import time
+import threading
+import uuid
 from datetime import datetime
 from functools import wraps
 from collections import deque
@@ -87,11 +89,20 @@ SUPER_BATCH_DELAY = 10.0
 DOWNLOAD_BATCH_SIZE = 10  # Smaller batches for downloads (media files are larger)
 DOWNLOAD_OPERATION_DELAY = 0.5  # Longer delay for downloads
 
+# Load-balanced batch download settings
+BATCH_DOWNLOAD_SIZE = 50  # Number of voicemails per download batch/ZIP
+BATCH_EXPIRY_SECONDS = 3600  # 1 hour expiry for download links
+
 # Safety limit: 50 pages * 100 items = 5000 voicemails max
 MAX_PAGES = 50
 
 # Progress tracking for SSE
 progress_data = {}
+
+# Storage for prepared batch downloads
+# Format: {batch_id: {'zip_path': str, 'created': timestamp, 'status': str, 'filename': str}}
+prepared_batches = {}
+batch_lock = threading.Lock()
 
 # ============================================================================
 # PKCE HELPER FUNCTIONS
@@ -623,17 +634,129 @@ def format_datetime(date_string):
 
 
 def cleanup_old_exports():
-    """Clean up export files older than 1 hour"""
+    """Clean up export files older than 1 hour and expired batch downloads"""
     try:
         now = time.time()
+        # Clean up temp directory
         for item in os.listdir(TEMP_DIR):
             item_path = os.path.join(TEMP_DIR, item)
             if os.path.isfile(item_path) and now - os.path.getmtime(item_path) > 3600:
                 os.remove(item_path)
             elif os.path.isdir(item_path) and now - os.path.getmtime(item_path) > 3600:
                 shutil.rmtree(item_path, ignore_errors=True)
+
+        # Clean up expired batch downloads
+        with batch_lock:
+            expired_ids = []
+            for batch_id, batch_info in prepared_batches.items():
+                if now - batch_info.get('created', 0) > BATCH_EXPIRY_SECONDS:
+                    expired_ids.append(batch_id)
+                    # Remove ZIP file if exists
+                    zip_path = batch_info.get('zip_path')
+                    if zip_path and os.path.exists(zip_path):
+                        try:
+                            os.remove(zip_path)
+                        except:
+                            pass
+
+            for batch_id in expired_ids:
+                del prepared_batches[batch_id]
+
+            if expired_ids:
+                app.logger.info(f"Cleaned up {len(expired_ids)} expired batch downloads")
+
     except Exception as e:
         app.logger.error(f"Cleanup error: {e}")
+
+
+def prepare_batch_zip(batch_id, voicemails, access_token, region_host, user_name, batch_num, total_batches):
+    """
+    Prepare a single batch ZIP file in the background.
+    This function runs in a separate thread.
+    """
+    try:
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        export_name = f"voicemails_batch{batch_num}of{total_batches}_{user_name}_{timestamp}"
+        export_dir = os.path.join(TEMP_DIR, f"{export_name}_temp")
+        os.makedirs(export_dir, exist_ok=True)
+
+        downloaded = 0
+        errors = []
+        total_items = len(voicemails)
+
+        app.logger.info(f"Batch {batch_num}/{total_batches}: Starting download of {total_items} voicemails")
+
+        # Download voicemails with rate limiting
+        for batch_start in range(0, total_items, DOWNLOAD_BATCH_SIZE):
+            batch_end = min(batch_start + DOWNLOAD_BATCH_SIZE, total_items)
+            batch = voicemails[batch_start:batch_end]
+
+            for idx, vm in enumerate(batch):
+                msg_id = vm.get('id')
+                filename = format_filename(vm)
+
+                media_bytes, dl_error = download_voicemail_media(access_token, region_host, msg_id)
+
+                if dl_error:
+                    errors.append(f"{filename}: {dl_error}")
+                else:
+                    filepath = os.path.join(export_dir, filename)
+                    with open(filepath, 'wb') as f:
+                        f.write(media_bytes)
+                    downloaded += 1
+
+                # Delay between downloads
+                if idx < len(batch) - 1:
+                    time.sleep(DOWNLOAD_OPERATION_DELAY)
+
+            # Delay between internal batches
+            if batch_end < total_items:
+                time.sleep(BATCH_DELAY)
+
+        # Save metadata
+        metadata_file = os.path.join(export_dir, 'metadata.json')
+        with open(metadata_file, 'w', encoding='utf-8') as f:
+            json.dump({
+                'batch_number': batch_num,
+                'total_batches': total_batches,
+                'exported_by': user_name,
+                'exported_at': datetime.now().isoformat(),
+                'total_voicemails': total_items,
+                'downloaded': downloaded,
+                'errors': errors
+            }, f, indent=2, default=str)
+
+        # Create ZIP
+        zip_path = os.path.join(TEMP_DIR, f"{export_name}.zip")
+        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            for root, dirs, files in os.walk(export_dir):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    arcname = os.path.relpath(file_path, export_dir)
+                    zipf.write(file_path, arcname)
+
+        # Clean up temp directory
+        shutil.rmtree(export_dir, ignore_errors=True)
+
+        # Update batch status
+        with batch_lock:
+            prepared_batches[batch_id].update({
+                'status': 'ready',
+                'zip_path': zip_path,
+                'downloaded': downloaded,
+                'errors': len(errors),
+                'total': total_items
+            })
+
+        app.logger.info(f"Batch {batch_num}/{total_batches}: Complete - {downloaded}/{total_items} downloaded")
+
+    except Exception as e:
+        app.logger.error(f"Batch {batch_num} preparation failed: {e}")
+        with batch_lock:
+            prepared_batches[batch_id].update({
+                'status': 'failed',
+                'error': str(e)
+            })
 
 
 # ============================================================================
@@ -882,7 +1005,224 @@ def download_page():
                          region=REGIONS.get(region_key, {}),
                          voicemails=processed_voicemails,
                          voicemail_count=len(processed_voicemails),
-                         batch_size=DOWNLOAD_BATCH_SIZE)
+                         batch_size=DOWNLOAD_BATCH_SIZE,
+                         batch_download_size=BATCH_DOWNLOAD_SIZE)
+
+
+@app.route('/download-prepare', methods=['POST'])
+@login_required
+def download_prepare():
+    """
+    Prepare batch downloads - splits voicemails into batches of 50,
+    starts background preparation, and returns manifest page with download links.
+    """
+    if not ENABLE_DOWNLOADS:
+        flash('Download functionality is currently disabled.', 'warning')
+        return redirect(url_for('download_page'))
+
+    access_token = session.get('access_token')
+    region_host = session.get('region_host')
+    region_key = session.get('region_key')
+    user_info = session.get('user_info', {})
+
+    data = request.get_json()
+    if not data:
+        flash('No data provided', 'danger')
+        return redirect(url_for('download_page'))
+
+    voicemail_ids = data.get('voicemail_ids', [])
+
+    if not voicemail_ids:
+        flash('No voicemails selected', 'warning')
+        return redirect(url_for('download_page'))
+
+    # Get all voicemails to get metadata
+    all_voicemails, _ = get_all_voicemails(access_token, region_host)
+    selected_vms = [vm for vm in all_voicemails if vm.get('id') in voicemail_ids]
+
+    # Sort by date to maintain order
+    selected_vms.sort(key=lambda vm: vm.get('createdDate', '') or '', reverse=True)
+
+    # Split into batches of BATCH_DOWNLOAD_SIZE (50)
+    total_vms = len(selected_vms)
+    num_batches = (total_vms + BATCH_DOWNLOAD_SIZE - 1) // BATCH_DOWNLOAD_SIZE
+
+    user_name = user_info.get('name', 'Unknown').replace(' ', '_')
+    manifest_id = str(uuid.uuid4())
+    batch_ids = []
+
+    # Create batch entries and start preparation threads
+    for i in range(num_batches):
+        start_idx = i * BATCH_DOWNLOAD_SIZE
+        end_idx = min(start_idx + BATCH_DOWNLOAD_SIZE, total_vms)
+        batch_vms = selected_vms[start_idx:end_idx]
+        batch_num = i + 1
+
+        batch_id = str(uuid.uuid4())
+        batch_ids.append(batch_id)
+
+        # Initialize batch entry
+        with batch_lock:
+            prepared_batches[batch_id] = {
+                'status': 'preparing',
+                'created': time.time(),
+                'batch_num': batch_num,
+                'total_batches': num_batches,
+                'total': len(batch_vms),
+                'manifest_id': manifest_id,
+                'filename': f"voicemails_batch{batch_num}of{num_batches}_{user_name}.zip"
+            }
+
+        # Start background thread for this batch
+        thread = threading.Thread(
+            target=prepare_batch_zip,
+            args=(batch_id, batch_vms, access_token, region_host, user_name, batch_num, num_batches)
+        )
+        thread.daemon = True
+        thread.start()
+
+    app.logger.info(f"Started preparation of {num_batches} batches for {total_vms} voicemails")
+
+    # Return manifest data as JSON
+    batches_info = []
+    with batch_lock:
+        for batch_id in batch_ids:
+            batch = prepared_batches[batch_id]
+            batches_info.append({
+                'id': batch_id,
+                'batch_num': batch['batch_num'],
+                'total_batches': batch['total_batches'],
+                'total': batch['total'],
+                'status': batch['status'],
+                'filename': batch['filename']
+            })
+
+    return jsonify({
+        'success': True,
+        'manifest_id': manifest_id,
+        'batches': batches_info,
+        'total_voicemails': total_vms,
+        'num_batches': num_batches
+    })
+
+
+@app.route('/download-manifest')
+@login_required
+def download_manifest():
+    """Display the manifest page with all batch download links"""
+    if not ENABLE_DOWNLOADS:
+        flash('Download functionality is currently disabled.', 'warning')
+        return redirect(url_for('dashboard'))
+
+    manifest_id = request.args.get('manifest_id')
+    if not manifest_id:
+        flash('No manifest ID provided', 'danger')
+        return redirect(url_for('download_page'))
+
+    user_info = session.get('user_info', {})
+    region_key = session.get('region_key')
+
+    # Get all batches for this manifest
+    batches_info = []
+    with batch_lock:
+        for batch_id, batch in prepared_batches.items():
+            if batch.get('manifest_id') == manifest_id:
+                batches_info.append({
+                    'id': batch_id,
+                    'batch_num': batch['batch_num'],
+                    'total_batches': batch['total_batches'],
+                    'total': batch['total'],
+                    'status': batch['status'],
+                    'filename': batch['filename'],
+                    'downloaded': batch.get('downloaded', 0),
+                    'errors': batch.get('errors', 0)
+                })
+
+    # Sort by batch number
+    batches_info.sort(key=lambda x: x['batch_num'])
+
+    if not batches_info:
+        flash('Manifest not found or expired', 'warning')
+        return redirect(url_for('download_page'))
+
+    total_voicemails = sum(b['total'] for b in batches_info)
+
+    return render_template('download_manifest.html',
+                         user_info=user_info,
+                         region=REGIONS.get(region_key, {}),
+                         manifest_id=manifest_id,
+                         batches=batches_info,
+                         total_voicemails=total_voicemails,
+                         expiry_minutes=BATCH_EXPIRY_SECONDS // 60)
+
+
+@app.route('/download-batch/<batch_id>')
+@login_required
+def download_batch(batch_id):
+    """Serve a prepared batch ZIP file"""
+    if not ENABLE_DOWNLOADS:
+        flash('Download functionality is currently disabled.', 'warning')
+        return redirect(url_for('dashboard'))
+
+    with batch_lock:
+        batch = prepared_batches.get(batch_id)
+
+    if not batch:
+        flash('Batch not found or expired', 'danger')
+        return redirect(url_for('download_page'))
+
+    if batch['status'] == 'preparing':
+        flash('Batch is still being prepared. Please wait and try again.', 'warning')
+        return redirect(url_for('download_page'))
+
+    if batch['status'] == 'failed':
+        flash(f'Batch preparation failed: {batch.get("error", "Unknown error")}', 'danger')
+        return redirect(url_for('download_page'))
+
+    zip_path = batch.get('zip_path')
+    if not zip_path or not os.path.exists(zip_path):
+        flash('ZIP file not found. It may have expired.', 'danger')
+        return redirect(url_for('download_page'))
+
+    return send_file(
+        zip_path,
+        mimetype='application/zip',
+        as_attachment=True,
+        download_name=batch.get('filename', 'voicemails.zip')
+    )
+
+
+@app.route('/api/batch-status')
+@login_required
+def api_batch_status():
+    """Get status of batches for a manifest"""
+    manifest_id = request.args.get('manifest_id')
+    if not manifest_id:
+        return jsonify({'error': 'No manifest ID provided'}), 400
+
+    batches_info = []
+    with batch_lock:
+        for batch_id, batch in prepared_batches.items():
+            if batch.get('manifest_id') == manifest_id:
+                batches_info.append({
+                    'id': batch_id,
+                    'batch_num': batch['batch_num'],
+                    'status': batch['status'],
+                    'downloaded': batch.get('downloaded', 0),
+                    'errors': batch.get('errors', 0),
+                    'total': batch['total']
+                })
+
+    batches_info.sort(key=lambda x: x['batch_num'])
+
+    all_ready = all(b['status'] == 'ready' for b in batches_info)
+    any_failed = any(b['status'] == 'failed' for b in batches_info)
+
+    return jsonify({
+        'batches': batches_info,
+        'all_ready': all_ready,
+        'any_failed': any_failed
+    })
 
 
 @app.route('/download-bulk', methods=['POST'])
