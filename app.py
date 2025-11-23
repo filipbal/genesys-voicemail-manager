@@ -92,6 +92,7 @@ DOWNLOAD_OPERATION_DELAY = 0.5  # Longer delay for downloads
 # Load-balanced batch download settings
 BATCH_DOWNLOAD_SIZE = 50  # Number of voicemails per download batch/ZIP
 BATCH_EXPIRY_SECONDS = 3600  # 1 hour expiry for download links
+MAX_CONCURRENT_BATCHES = 3  # Maximum concurrent batch preparations
 
 # Safety limit: 50 pages * 100 items = 5000 voicemails max
 MAX_PAGES = 50
@@ -103,6 +104,7 @@ progress_data = {}
 # Format: {batch_id: {'zip_path': str, 'created': timestamp, 'status': str, 'filename': str}}
 prepared_batches = {}
 batch_lock = threading.Lock()
+batch_semaphore = threading.Semaphore(MAX_CONCURRENT_BATCHES)
 
 # ============================================================================
 # PKCE HELPER FUNCTIONS
@@ -673,7 +675,11 @@ def prepare_batch_zip(batch_id, voicemails, access_token, region_host, user_name
     """
     Prepare a single batch ZIP file in the background.
     This function runs in a separate thread.
+    Uses semaphore to limit concurrent batch preparations.
     """
+    # Wait for semaphore to limit concurrent batches
+    batch_semaphore.acquire()
+
     try:
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         export_name = f"voicemails_batch{batch_num}of{total_batches}_{user_name}_{timestamp}"
@@ -757,6 +763,9 @@ def prepare_batch_zip(batch_id, voicemails, access_token, region_host, user_name
                 'status': 'failed',
                 'error': str(e)
             })
+    finally:
+        # Always release semaphore
+        batch_semaphore.release()
 
 
 # ============================================================================
@@ -1037,8 +1046,22 @@ def download_prepare():
         return redirect(url_for('download_page'))
 
     # Get all voicemails to get metadata
-    all_voicemails, _ = get_all_voicemails(access_token, region_host)
+    all_voicemails, error = get_all_voicemails(access_token, region_host)
+
+    if error or not all_voicemails:
+        app.logger.error(f"Failed to fetch voicemails: {error}")
+        return jsonify({
+            'success': False,
+            'error': f'Failed to fetch voicemails: {error or "No voicemails returned"}'
+        }), 500
+
     selected_vms = [vm for vm in all_voicemails if vm.get('id') in voicemail_ids]
+
+    if not selected_vms:
+        return jsonify({
+            'success': False,
+            'error': 'No matching voicemails found for the selected IDs'
+        }), 400
 
     # Sort by date to maintain order
     selected_vms.sort(key=lambda vm: vm.get('createdDate', '') or '', reverse=True)
@@ -1051,7 +1074,9 @@ def download_prepare():
     manifest_id = str(uuid.uuid4())
     batch_ids = []
 
-    # Create batch entries and start preparation threads
+    app.logger.info(f"Preparing {num_batches} batches for {total_vms} voicemails (max {MAX_CONCURRENT_BATCHES} concurrent)")
+
+    # Create all batch entries first
     for i in range(num_batches):
         start_idx = i * BATCH_DOWNLOAD_SIZE
         end_idx = min(start_idx + BATCH_DOWNLOAD_SIZE, total_vms)
@@ -1070,8 +1095,16 @@ def download_prepare():
                 'total_batches': num_batches,
                 'total': len(batch_vms),
                 'manifest_id': manifest_id,
-                'filename': f"voicemails_batch{batch_num}of{num_batches}_{user_name}.zip"
+                'filename': f"voicemails_batch{batch_num}of{num_batches}_{user_name}.zip",
+                'voicemails': batch_vms  # Store for thread to use
             }
+
+    # Start threads with small delays to avoid overwhelming system
+    for i, batch_id in enumerate(batch_ids):
+        with batch_lock:
+            batch_data = prepared_batches[batch_id]
+            batch_vms = batch_data.pop('voicemails')  # Remove from storage, pass to thread
+            batch_num = batch_data['batch_num']
 
         # Start background thread for this batch
         thread = threading.Thread(
@@ -1080,6 +1113,10 @@ def download_prepare():
         )
         thread.daemon = True
         thread.start()
+
+        # Small delay between starting threads to stagger them
+        if i < len(batch_ids) - 1:
+            time.sleep(0.1)
 
     app.logger.info(f"Started preparation of {num_batches} batches for {total_vms} voicemails")
 
