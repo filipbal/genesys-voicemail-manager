@@ -1,24 +1,19 @@
 #!/usr/bin/env python3
 """
-Genesys Cloud Voicemail Web Exporter - FIXED VERSION v6
-========================================================
-CRITICAL FIX: Accurate voicemail counting
+Genesys Cloud Voicemail Web Exporter - IMPROVED VERSION v7
+==========================================================
+NEW FEATURES:
+1. Dedicated Download page with selection UI
+2. Streaming progress for bulk downloads
+3. 5-column dashboard with Delete All button
+4. Better progress feedback during long operations
 
-PROBLEM: 
-1. The Genesys API's 'total' field is STALE - updates in batches of 25
-2. The API returns DELETED voicemails (soft-deleted, retained for 14 days via deleteRetentionPolicy)
-3. This causes incorrect counts: 500 VMs -> delete 1 -> still shows 500
-
-SOLUTION:
-1. Use /api/v2/voicemail/me/messages endpoint (pageSize max 50)
-2. Fetch all pages using API's pageCount
-3. Filter out deleted voicemails manually (deleted=true, state='DELETED', or deletedDate != null)
-4. Count actual non-deleted entities = TRUE TOTAL
-
-DELETE RETENTION POLICY:
-Genesys keeps deleted voicemails for 14 days (deleteRetentionPolicy.numberOfDays)
-before permanently removing them. During this period, they appear in API results
-with deleted=true, so we must filter them out.
+CHANGES FROM v6:
+- Added /download route for bulk download page
+- Added streaming progress via Server-Sent Events (SSE)
+- Updated dashboard.html for 5-column layout
+- Added templates/download.html
+- Improved batch download with progress tracking
 """
 
 import os
@@ -34,10 +29,11 @@ import zipfile
 import time
 from datetime import datetime
 from functools import wraps
+from collections import deque
 
 from flask import (
     Flask, render_template, request, redirect, url_for, 
-    session, flash, send_file, jsonify, Response
+    session, flash, send_file, jsonify, Response, stream_with_context
 )
 
 # ============================================================================
@@ -84,9 +80,15 @@ MAX_RETRIES = 5
 SUPER_BATCH_SIZE = 5
 SUPER_BATCH_DELAY = 10.0
 
+# Download-specific settings
+DOWNLOAD_BATCH_SIZE = 10  # Smaller batches for downloads (media files are larger)
+DOWNLOAD_OPERATION_DELAY = 0.5  # Longer delay for downloads
+
 # Safety limit: 50 pages * 100 items = 5000 voicemails max
 MAX_PAGES = 50
 
+# Progress tracking for SSE
+progress_data = {}
 
 # ============================================================================
 # PKCE HELPER FUNCTIONS
@@ -263,15 +265,10 @@ def get_all_voicemails(access_token, region_host):
             break
         
         # Filter out DELETED voicemails
-        # A voicemail is deleted if:
-        # - deleted=true, OR
-        # - state='DELETED', OR
-        # - deletedDate is not null
         page_active = []
         page_deleted = 0
         
         for vm in entities:
-            # Check multiple deletion indicators
             is_deleted = (
                 vm.get('deleted', False) or
                 vm.get('state', '').upper() == 'DELETED' or
@@ -432,7 +429,7 @@ def delete_voicemail_single(access_token, region_host, voicemail_id):
 # ============================================================================
 
 def process_voicemails_in_batches(access_token, region_host, voicemail_ids, operation, 
-                                   target_id=None, target_type='user'):
+                                   target_id=None, target_type='user', progress_id=None):
     """
     Process voicemails in batches to avoid rate limiting.
     
@@ -440,6 +437,7 @@ def process_voicemails_in_batches(access_token, region_host, voicemail_ids, oper
         operation: 'forward' or 'delete'
         target_id: Required for forward operation
         target_type: 'user' or 'group' for forward operation
+        progress_id: Optional ID for progress tracking via SSE
     """
     results = {
         'success': 0,
@@ -455,6 +453,16 @@ def process_voicemails_in_batches(access_token, region_host, voicemail_ids, oper
     consecutive_failures = 0
     
     app.logger.info(f"Starting {operation}: {total_ids} items in {total_batches} batches")
+    
+    # Initialize progress if tracking
+    if progress_id:
+        progress_data[progress_id] = {
+            'processed': 0,
+            'total': total_ids,
+            'success': 0,
+            'failed': 0,
+            'status': 'processing'
+        }
     
     for batch_start in range(0, total_ids, BATCH_SIZE):
         batch_end = min(batch_start + BATCH_SIZE, total_ids)
@@ -500,6 +508,14 @@ def process_voicemails_in_batches(access_token, region_host, voicemail_ids, oper
                 
                 results['processed'] += 1
                 
+                # Update progress
+                if progress_id:
+                    progress_data[progress_id].update({
+                        'processed': results['processed'],
+                        'success': results['success'],
+                        'failed': results['failed']
+                    })
+                
                 # Delay between operations within a batch
                 if idx < len(batch) - 1:
                     time.sleep(OPERATION_DELAY)
@@ -508,6 +524,12 @@ def process_voicemails_in_batches(access_token, region_host, voicemail_ids, oper
                 results['failed'] += 1
                 results['errors'].append(f"{vm_id[:8]}: {str(e)}")
                 results['processed'] += 1
+                
+                if progress_id:
+                    progress_data[progress_id].update({
+                        'processed': results['processed'],
+                        'failed': results['failed']
+                    })
         
         batches_since_super_break += 1
         
@@ -516,6 +538,10 @@ def process_voicemails_in_batches(access_token, region_host, voicemail_ids, oper
             delay = BATCH_DELAY * 2 if batch_failures > 0 else BATCH_DELAY
             app.logger.debug(f"Batch {batch_num}/{total_batches} complete, waiting {delay}s...")
             time.sleep(delay)
+    
+    # Mark progress as complete
+    if progress_id:
+        progress_data[progress_id]['status'] = 'complete'
     
     app.logger.info(
         f"Operation complete: {results['success']} success, "
@@ -819,103 +845,235 @@ def download_single(message_id):
     )
 
 
-@app.route('/download-all')
+@app.route('/download')
 @login_required
-def download_all():
-    """Download all voicemails as a ZIP archive"""
+def download_page():
+    """Download page - bulk download with selection UI"""
     access_token = session.get('access_token')
     region_host = session.get('region_host')
+    region_key = session.get('region_key')
     user_info = session.get('user_info', {})
     
     # Get all voicemails
     all_voicemails, error = get_all_voicemails(access_token, region_host)
     
-    if error or not all_voicemails:
-        flash('No voicemails to download.', 'warning')
-        return redirect(url_for('dashboard'))
+    if error:
+        flash(f'Error fetching voicemails: {error}', 'warning')
+        all_voicemails = []
     
-    # Create export directory
-    user_name = user_info.get('name', 'Unknown').replace(' ', '_')
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    export_name = f"voicemails_{user_name}_{timestamp}"
-    export_dir = os.path.join(TEMP_DIR, export_name)
-    os.makedirs(export_dir, exist_ok=True)
+    processed_voicemails = [format_voicemail(vm) for vm in all_voicemails]
     
-    # Download voicemails in batches
-    downloaded = 0
-    errors = []
-    total_items = len(all_voicemails)
-    batches_since_super_break = 0
+    return render_template('download.html',
+                         user_info=user_info,
+                         region=REGIONS.get(region_key, {}),
+                         voicemails=processed_voicemails,
+                         voicemail_count=len(processed_voicemails),
+                         batch_size=DOWNLOAD_BATCH_SIZE)
+
+
+@app.route('/api/download-bulk', methods=['POST'])
+@login_required
+def api_download_bulk():
+    """
+    Bulk download with progress tracking via SSE
     
-    app.logger.info(f"Starting bulk download of {total_items} voicemails")
+    This endpoint starts the download process and returns a progress_id
+    that can be used to track progress via the /api/download-progress/<id> endpoint
+    """
+    access_token = session.get('access_token')
+    region_host = session.get('region_host')
+    user_info = session.get('user_info', {})
     
-    for batch_start in range(0, total_items, BATCH_SIZE):
-        batch_end = min(batch_start + BATCH_SIZE, total_items)
-        batch = all_voicemails[batch_start:batch_end]
-        batch_num = (batch_start // BATCH_SIZE) + 1
+    data = request.get_json()
+    if not data:
+        return jsonify({'success': False, 'error': 'No data provided'}), 400
+    
+    voicemail_ids = data.get('voicemail_ids', [])
+    
+    if not voicemail_ids:
+        return jsonify({'success': False, 'error': 'No voicemails selected'}), 400
+    
+    # Generate progress ID
+    progress_id = secrets.token_urlsafe(16)
+    
+    # Start download in background (we'll handle this synchronously but with progress updates)
+    # For a production app, you'd use Celery or similar for true background processing
+    
+    # Initialize progress
+    progress_data[progress_id] = {
+        'processed': 0,
+        'total': len(voicemail_ids),
+        'downloaded': 0,
+        'failed': 0,
+        'status': 'starting',
+        'zip_ready': False,
+        'zip_path': None
+    }
+    
+    return jsonify({
+        'success': True,
+        'progress_id': progress_id,
+        'total': len(voicemail_ids)
+    })
+
+
+@app.route('/api/download-progress/<progress_id>')
+@login_required
+def download_progress_stream(progress_id):
+    """Server-Sent Events stream for download progress"""
+    def generate():
+        """Generator function for SSE"""
+        access_token = session.get('access_token')
+        region_host = session.get('region_host')
+        user_info = session.get('user_info', {})
         
-        # Super batch break
-        if batches_since_super_break >= SUPER_BATCH_SIZE and batch_num > 1:
-            time.sleep(SUPER_BATCH_DELAY)
-            batches_since_super_break = 0
+        if progress_id not in progress_data:
+            yield f"data: {json.dumps({'error': 'Invalid progress ID'})}\n\n"
+            return
         
-        # Download batch
-        for idx, vm in enumerate(batch):
-            msg_id = vm.get('id')
-            filename = format_filename(vm)
+        # Get voicemail IDs from query param (passed when starting stream)
+        voicemail_ids_param = request.args.get('voicemail_ids', '')
+        if voicemail_ids_param:
+            voicemail_ids = voicemail_ids_param.split(',')
+        else:
+            yield f"data: {json.dumps({'error': 'No voicemail IDs provided'})}\n\n"
+            return
+        
+        # Get all voicemails to get metadata
+        all_voicemails, _ = get_all_voicemails(access_token, region_host)
+        selected_vms = [vm for vm in all_voicemails if vm.get('id') in voicemail_ids]
+        
+        # Create export directory
+        user_name = user_info.get('name', 'Unknown').replace(' ', '_')
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        export_name = f"voicemails_{user_name}_{timestamp}"
+        export_dir = os.path.join(TEMP_DIR, export_name)
+        os.makedirs(export_dir, exist_ok=True)
+        
+        progress_data[progress_id]['status'] = 'downloading'
+        
+        # Download voicemails in batches
+        downloaded = 0
+        errors = []
+        total_items = len(selected_vms)
+        batches_since_super_break = 0
+        
+        for batch_start in range(0, total_items, DOWNLOAD_BATCH_SIZE):
+            batch_end = min(batch_start + DOWNLOAD_BATCH_SIZE, total_items)
+            batch = selected_vms[batch_start:batch_end]
+            batch_num = (batch_start // DOWNLOAD_BATCH_SIZE) + 1
             
-            media_bytes, dl_error = download_voicemail_media(access_token, region_host, msg_id)
+            # Super batch break
+            if batches_since_super_break >= SUPER_BATCH_SIZE and batch_num > 1:
+                time.sleep(SUPER_BATCH_DELAY)
+                batches_since_super_break = 0
             
-            if dl_error:
-                errors.append(f"{filename}: {dl_error}")
-            else:
-                filepath = os.path.join(export_dir, filename)
-                with open(filepath, 'wb') as f:
-                    f.write(media_bytes)
-                downloaded += 1
+            # Download batch
+            for idx, vm in enumerate(batch):
+                msg_id = vm.get('id')
+                filename = format_filename(vm)
+                
+                media_bytes, dl_error = download_voicemail_media(access_token, region_host, msg_id)
+                
+                if dl_error:
+                    errors.append(f"{filename}: {dl_error}")
+                    progress_data[progress_id]['failed'] += 1
+                else:
+                    filepath = os.path.join(export_dir, filename)
+                    with open(filepath, 'wb') as f:
+                        f.write(media_bytes)
+                    downloaded += 1
+                    progress_data[progress_id]['downloaded'] += 1
+                
+                progress_data[progress_id]['processed'] += 1
+                
+                # Send progress update
+                progress_pct = int((progress_data[progress_id]['processed'] / total_items) * 100)
+                yield f"data: {json.dumps({'progress': progress_pct, 'processed': progress_data[progress_id]['processed'], 'total': total_items, 'downloaded': downloaded, 'failed': len(errors)})}\n\n"
+                
+                # Delay between downloads
+                if idx < len(batch) - 1:
+                    time.sleep(DOWNLOAD_OPERATION_DELAY)
             
-            # Delay between downloads
-            if idx < len(batch) - 1:
-                time.sleep(OPERATION_DELAY)
+            batches_since_super_break += 1
+            
+            # Delay between batches
+            if batch_end < total_items:
+                time.sleep(BATCH_DELAY)
         
-        batches_since_super_break += 1
+        # Save metadata
+        metadata_file = os.path.join(export_dir, 'metadata.json')
+        with open(metadata_file, 'w', encoding='utf-8') as f:
+            json.dump({
+                'exported_by': user_info.get('name'),
+                'exported_at': datetime.now().isoformat(),
+                'total_voicemails': len(selected_vms),
+                'downloaded': downloaded,
+                'errors': errors
+            }, f, indent=2, default=str)
         
-        # Delay between batches
-        if batch_end < total_items:
-            time.sleep(BATCH_DELAY)
+        # Create ZIP
+        progress_data[progress_id]['status'] = 'zipping'
+        yield f"data: {json.dumps({'status': 'zipping', 'progress': 95})}\n\n"
+        
+        zip_path = os.path.join(TEMP_DIR, f"{export_name}.zip")
+        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            for root, dirs, files in os.walk(export_dir):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    arcname = os.path.relpath(file_path, export_dir)
+                    zipf.write(file_path, arcname)
+        
+        # Clean up temp directory
+        shutil.rmtree(export_dir, ignore_errors=True)
+        
+        # Mark complete
+        progress_data[progress_id].update({
+            'status': 'complete',
+            'zip_ready': True,
+            'zip_path': zip_path,
+            'zip_filename': f"{export_name}.zip"
+        })
+        
+        yield f"data: {json.dumps({'status': 'complete', 'progress': 100, 'downloaded': downloaded, 'failed': len(errors), 'zip_filename': f'{export_name}.zip'})}\n\n"
     
-    # Save metadata
-    metadata_file = os.path.join(export_dir, 'metadata.json')
-    with open(metadata_file, 'w', encoding='utf-8') as f:
-        json.dump({
-            'exported_by': user_info.get('name'),
-            'exported_at': datetime.now().isoformat(),
-            'total_voicemails': len(all_voicemails),
-            'downloaded': downloaded,
-            'errors': errors
-        }, f, indent=2, default=str)
+    return Response(stream_with_context(generate()), mimetype='text/event-stream')
+
+
+@app.route('/api/download-file/<progress_id>')
+@login_required
+def download_zip_file(progress_id):
+    """Download the generated ZIP file"""
+    if progress_id not in progress_data:
+        flash('Download not found or expired.', 'danger')
+        return redirect(url_for('download_page'))
     
-    # Create ZIP
-    zip_path = os.path.join(TEMP_DIR, f"{export_name}.zip")
-    with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-        for root, dirs, files in os.walk(export_dir):
-            for file in files:
-                file_path = os.path.join(root, file)
-                arcname = os.path.relpath(file_path, export_dir)
-                zipf.write(file_path, arcname)
+    progress = progress_data[progress_id]
     
-    # Clean up temp directory
-    shutil.rmtree(export_dir, ignore_errors=True)
+    if not progress.get('zip_ready') or not progress.get('zip_path'):
+        flash('Download not ready yet.', 'warning')
+        return redirect(url_for('download_page'))
     
-    if errors:
-        flash(f'Downloaded {downloaded}/{len(all_voicemails)} voicemails. Some failed.', 'warning')
+    zip_path = progress['zip_path']
+    zip_filename = progress['zip_filename']
+    
+    # Clean up progress data after download starts
+    # (file will be cleaned up by cleanup_old_exports)
+    progress_data.pop(progress_id, None)
     
     return send_file(
         zip_path,
         mimetype='application/zip',
         as_attachment=True,
-        download_name=f"{export_name}.zip"
+        download_name=zip_filename
     )
+
+
+@app.route('/download-all')
+@login_required
+def download_all():
+    """Legacy endpoint - redirect to new download page"""
+    return redirect(url_for('download_page'))
 
 
 @app.route('/forward')
@@ -1184,7 +1342,7 @@ def health():
     """Health check endpoint"""
     return jsonify({
         'status': 'healthy',
-        'version': 'v6-accurate-count-with-deleted-filter',
+        'version': 'v7-improved-download-progress',
         'timestamp': datetime.now().isoformat()
     })
 
