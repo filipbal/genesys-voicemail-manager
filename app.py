@@ -92,7 +92,6 @@ DOWNLOAD_OPERATION_DELAY = 0.5  # Longer delay for downloads
 # Load-balanced batch download settings
 BATCH_DOWNLOAD_SIZE = 50  # Number of voicemails per download batch/ZIP
 BATCH_EXPIRY_SECONDS = 3600  # 1 hour expiry for download links
-MAX_CONCURRENT_BATCHES = 3  # Maximum concurrent batch preparations
 
 # Safety limit: 50 pages * 100 items = 5000 voicemails max
 MAX_PAGES = 50
@@ -104,7 +103,11 @@ progress_data = {}
 # Format: {batch_id: {'zip_path': str, 'created': timestamp, 'status': str, 'filename': str}}
 prepared_batches = {}
 batch_lock = threading.Lock()
-batch_semaphore = threading.Semaphore(MAX_CONCURRENT_BATCHES)
+
+# Queue for sequential batch processing
+from queue import Queue
+batch_queue = Queue()
+batch_worker_running = False
 
 # ============================================================================
 # PKCE HELPER FUNCTIONS
@@ -671,15 +674,11 @@ def cleanup_old_exports():
         app.logger.error(f"Cleanup error: {e}")
 
 
-def prepare_batch_zip(batch_id, voicemails, access_token, region_host, user_name, batch_num, total_batches):
+def process_single_batch(batch_id, voicemails, access_token, region_host, user_name, batch_num, total_batches):
     """
-    Prepare a single batch ZIP file in the background.
-    This function runs in a separate thread.
-    Uses semaphore to limit concurrent batch preparations.
+    Process a single batch - download voicemails and create ZIP.
+    Called by the batch worker thread.
     """
-    # Wait for semaphore to limit concurrent batches
-    batch_semaphore.acquire()
-
     try:
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         export_name = f"voicemails_batch{batch_num}of{total_batches}_{user_name}_{timestamp}"
@@ -746,26 +745,83 @@ def prepare_batch_zip(batch_id, voicemails, access_token, region_host, user_name
 
         # Update batch status
         with batch_lock:
-            prepared_batches[batch_id].update({
-                'status': 'ready',
-                'zip_path': zip_path,
-                'downloaded': downloaded,
-                'errors': len(errors),
-                'total': total_items
-            })
+            if batch_id in prepared_batches:
+                prepared_batches[batch_id].update({
+                    'status': 'ready',
+                    'zip_path': zip_path,
+                    'downloaded': downloaded,
+                    'errors': len(errors),
+                    'total': total_items
+                })
 
         app.logger.info(f"Batch {batch_num}/{total_batches}: Complete - {downloaded}/{total_items} downloaded")
 
     except Exception as e:
         app.logger.error(f"Batch {batch_num} preparation failed: {e}")
         with batch_lock:
-            prepared_batches[batch_id].update({
-                'status': 'failed',
-                'error': str(e)
-            })
-    finally:
-        # Always release semaphore
-        batch_semaphore.release()
+            if batch_id in prepared_batches:
+                prepared_batches[batch_id].update({
+                    'status': 'failed',
+                    'error': str(e)
+                })
+
+
+def batch_worker():
+    """
+    Worker thread that processes batches sequentially from the queue.
+    Processes one batch at a time in order.
+    """
+    global batch_worker_running
+
+    app.logger.info("Batch worker started")
+
+    while True:
+        try:
+            # Get next batch from queue (blocks until available)
+            job = batch_queue.get(timeout=5)
+
+            if job is None:
+                # Poison pill - stop worker
+                break
+
+            batch_id, voicemails, access_token, region_host, user_name, batch_num, total_batches = job
+
+            # Update status to 'preparing'
+            with batch_lock:
+                if batch_id in prepared_batches:
+                    prepared_batches[batch_id]['status'] = 'preparing'
+
+            # Process this batch
+            process_single_batch(batch_id, voicemails, access_token, region_host, user_name, batch_num, total_batches)
+
+            # Mark task as done
+            batch_queue.task_done()
+
+            # Small delay between batches to be safe
+            time.sleep(1)
+
+        except Exception as e:
+            if str(e) != '':  # Ignore timeout exceptions
+                app.logger.error(f"Batch worker error: {e}")
+
+            # Check if queue is empty and no more work expected
+            if batch_queue.empty():
+                break
+
+    batch_worker_running = False
+    app.logger.info("Batch worker stopped")
+
+
+def start_batch_worker():
+    """Start the batch worker thread if not already running."""
+    global batch_worker_running
+
+    if not batch_worker_running:
+        batch_worker_running = True
+        worker_thread = threading.Thread(target=batch_worker)
+        worker_thread.daemon = True
+        worker_thread.start()
+        app.logger.info("Started batch worker thread")
 
 
 # ============================================================================
@@ -1074,9 +1130,9 @@ def download_prepare():
     manifest_id = str(uuid.uuid4())
     batch_ids = []
 
-    app.logger.info(f"Preparing {num_batches} batches for {total_vms} voicemails (max {MAX_CONCURRENT_BATCHES} concurrent)")
+    app.logger.info(f"Preparing {num_batches} batches for {total_vms} voicemails (sequential processing)")
 
-    # Create all batch entries first
+    # Create all batch entries and queue them for processing
     for i in range(num_batches):
         start_idx = i * BATCH_DOWNLOAD_SIZE
         end_idx = min(start_idx + BATCH_DOWNLOAD_SIZE, total_vms)
@@ -1089,36 +1145,22 @@ def download_prepare():
         # Initialize batch entry
         with batch_lock:
             prepared_batches[batch_id] = {
-                'status': 'preparing',
+                'status': 'queued',
                 'created': time.time(),
                 'batch_num': batch_num,
                 'total_batches': num_batches,
                 'total': len(batch_vms),
                 'manifest_id': manifest_id,
-                'filename': f"voicemails_batch{batch_num}of{num_batches}_{user_name}.zip",
-                'voicemails': batch_vms  # Store for thread to use
+                'filename': f"voicemails_batch{batch_num}of{num_batches}_{user_name}.zip"
             }
 
-    # Start threads with small delays to avoid overwhelming system
-    for i, batch_id in enumerate(batch_ids):
-        with batch_lock:
-            batch_data = prepared_batches[batch_id]
-            batch_vms = batch_data.pop('voicemails')  # Remove from storage, pass to thread
-            batch_num = batch_data['batch_num']
+        # Add to queue for sequential processing
+        batch_queue.put((batch_id, batch_vms, access_token, region_host, user_name, batch_num, num_batches))
 
-        # Start background thread for this batch
-        thread = threading.Thread(
-            target=prepare_batch_zip,
-            args=(batch_id, batch_vms, access_token, region_host, user_name, batch_num, num_batches)
-        )
-        thread.daemon = True
-        thread.start()
+    # Start the batch worker if not running
+    start_batch_worker()
 
-        # Small delay between starting threads to stagger them
-        if i < len(batch_ids) - 1:
-            time.sleep(0.1)
-
-    app.logger.info(f"Started preparation of {num_batches} batches for {total_vms} voicemails")
+    app.logger.info(f"Queued {num_batches} batches for {total_vms} voicemails")
 
     # Return manifest data as JSON
     batches_info = []
