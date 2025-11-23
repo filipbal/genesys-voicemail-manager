@@ -68,6 +68,9 @@ os.makedirs(TEMP_DIR, exist_ok=True)
 # CONFIGURATION
 # ============================================================================
 
+# FEATURE FLAGS
+ENABLE_DOWNLOADS = True  # Set to False to disable all download functionality
+
 API_PAGE_SIZE = 50  # Max items per API page (Genesys limit for /me/messages)
 DISPLAY_PAGE_SIZE = 50  # Items per UI page
 
@@ -811,13 +814,19 @@ def dashboard():
                          has_next=page < total_pages,
                          page_size=DISPLAY_PAGE_SIZE,
                          start_idx=start_idx + 1 if total_count > 0 else 0,
-                         end_idx=min(end_idx, total_count))
+                         end_idx=min(end_idx, total_count),
+                         enable_downloads=ENABLE_DOWNLOADS)
 
 
 @app.route('/download/<message_id>')
 @login_required
 def download_single(message_id):
     """Download a single voicemail as WAV file"""
+    # Check if downloads are enabled
+    if not ENABLE_DOWNLOADS:
+        flash('Download functionality is currently disabled.', 'warning')
+        return redirect(url_for('dashboard'))
+    
     access_token = session.get('access_token')
     region_host = session.get('region_host')
     
@@ -849,6 +858,11 @@ def download_single(message_id):
 @login_required
 def download_page():
     """Download page - bulk download with selection UI"""
+    # Check if downloads are enabled
+    if not ENABLE_DOWNLOADS:
+        flash('Download functionality is currently disabled.', 'warning')
+        return redirect(url_for('dashboard'))
+    
     access_token = session.get('access_token')
     region_host = session.get('region_host')
     region_key = session.get('region_key')
@@ -880,6 +894,10 @@ def api_download_bulk():
     This endpoint starts the download process and returns a progress_id
     that can be used to track progress via the /api/download-progress/<id> endpoint
     """
+    # Check if downloads are enabled
+    if not ENABLE_DOWNLOADS:
+        return jsonify({'success': False, 'error': 'Download functionality is disabled'}), 403
+    
     access_token = session.get('access_token')
     region_host = session.get('region_host')
     user_info = session.get('user_info', {})
@@ -921,6 +939,10 @@ def api_download_bulk():
 @login_required
 def download_progress_stream(progress_id):
     """Server-Sent Events stream for download progress"""
+    # Check if downloads are enabled
+    if not ENABLE_DOWNLOADS:
+        return jsonify({'error': 'Download functionality is disabled'}), 403
+    
     def generate():
         """Generator function for SSE"""
         access_token = session.get('access_token')
@@ -1044,6 +1066,11 @@ def download_progress_stream(progress_id):
 @login_required
 def download_zip_file(progress_id):
     """Download the generated ZIP file"""
+    # Check if downloads are enabled
+    if not ENABLE_DOWNLOADS:
+        flash('Download functionality is currently disabled.', 'warning')
+        return redirect(url_for('dashboard'))
+    
     if progress_id not in progress_data:
         flash('Download not found or expired.', 'danger')
         return redirect(url_for('download_page'))
@@ -1072,7 +1099,11 @@ def download_zip_file(progress_id):
 @app.route('/download-all')
 @login_required
 def download_all():
-    """Legacy endpoint - redirect to new download page"""
+    """Legacy endpoint - redirect to new download page or show disabled message"""
+    if not ENABLE_DOWNLOADS:
+        flash('Download functionality is currently disabled.', 'warning')
+        return redirect(url_for('dashboard'))
+    
     return redirect(url_for('download_page'))
 
 

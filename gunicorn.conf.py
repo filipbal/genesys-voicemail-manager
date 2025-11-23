@@ -1,12 +1,11 @@
 # Gunicorn configuration for Voicemail Manager
-# This config increases timeouts for long-running batch operations
+# Updated for large downloads (500+ voicemails)
 
-# Worker timeout - set high for batch operations
-# Default is 30 seconds, we need much more for 500+ voicemail operations
-timeout = 600  # 10 minutes
+# Worker timeout - increased to 900s (15 minutes) for large downloads
+timeout = 900  # 15 minutes (was 600)
 
 # Graceful timeout for worker restart
-graceful_timeout = 120
+graceful_timeout = 150
 
 # Keep-alive connections
 keepalive = 5
