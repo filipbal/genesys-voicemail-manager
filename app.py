@@ -78,12 +78,12 @@ DISPLAY_PAGE_SIZE = 50  # Items per UI page
 
 # Batch processing settings
 BATCH_SIZE = 25
-BATCH_DELAY = 3.0
-OPERATION_DELAY = 0.2
+BATCH_DELAY = 2.0
+OPERATION_DELAY = 0.4
 RATE_LIMIT_BACKOFF = 10.0
 MAX_RETRIES = 5
 SUPER_BATCH_SIZE = 5
-SUPER_BATCH_DELAY = 10.0
+SUPER_BATCH_DELAY = 8.0
 
 # Download-specific settings
 DOWNLOAD_BATCH_SIZE = 10  # Smaller batches for downloads (media files are larger)
