@@ -243,13 +243,13 @@ def get_voicemail_stats(access_token, region_host):
 
 def get_all_voicemails(access_token, region_host):
     """
-    Get ALL non-deleted voicemails including forwarded ones.
-    Uses /api/v2/voicemail/messages (without 'me') to get everything.
+    Get ALL non-deleted voicemails by actually counting them.
+    Don't trust API's 'total' - it's rounded to page size.
     """
     all_voicemails = []
     page_number = 1
     
-    app.logger.info("Fetching ALL voicemails including forwarded from /voicemail/messages...")
+    app.logger.info("Fetching voicemails and counting actual non-deleted entities...")
     
     while page_number <= MAX_PAGES:
         url = f"https://api.{region_host}/api/v2/voicemail/messages"
@@ -270,16 +270,21 @@ def get_all_voicemails(access_token, region_host):
         entities = data.get('entities', [])
         page_count = data.get('pageCount', 1)
         
-        app.logger.info(f"Page {page_number}/{page_count}: got {len(entities)} voicemails")
-        
+        # STOP if we get an empty page
         if not entities:
+            app.logger.info(f"Empty page at {page_number}, stopping")
             break
         
-        # Filter: exclude deleted=true
+        # Count actual non-deleted voicemails
+        non_deleted_count = 0
         for vm in entities:
             if not vm.get('deleted'):
                 all_voicemails.append(vm)
+                non_deleted_count += 1
         
+        app.logger.info(f"Page {page_number}: {non_deleted_count} non-deleted out of {len(entities)}")
+        
+        # Stop if we've processed all pages
         if page_number >= page_count:
             break
         
@@ -288,7 +293,8 @@ def get_all_voicemails(access_token, region_host):
     
     all_voicemails.sort(key=lambda vm: vm.get('createdDate', ''), reverse=True)
     
-    app.logger.info(f"✓ Fetched {len(all_voicemails)} non-deleted voicemails (including forwarded)")
+    actual_count = len(all_voicemails)
+    app.logger.info(f"✓ ACTUAL count: {actual_count} non-deleted voicemails")
     
     return all_voicemails, None
 
