@@ -243,25 +243,18 @@ def get_voicemail_stats(access_token, region_host):
 
 def get_all_voicemails(access_token, region_host):
     """
-    Get ALL voicemails with filtering - THE SOURCE OF TRUTH.
-    
-    Uses /api/v2/voicemail/me/messages endpoint (self-service, user's own voicemails).
-    Filters out soft-deleted voicemails manually.
-    Deduplicates by ID to ensure accurate count.
-    
-    Returns: (list of all active voicemails sorted by date desc, error)
+    Get ALL non-deleted voicemails.
+    Simple: fetch all pages, filter deleted=true, return list.
     """
     all_voicemails = []
     page_number = 1
-    api_page_count = None
     
-    app.logger.info("Fetching all voicemails from /me/messages endpoint...")
+    app.logger.info("Fetching voicemails from /me/messages...")
     
     while page_number <= MAX_PAGES:
-        # Use /me/messages endpoint - max pageSize is 50
         url = f"https://api.{region_host}/api/v2/voicemail/me/messages"
         params = {
-            'pageSize': API_PAGE_SIZE,  # Max 50 for /me/messages
+            'pageSize': API_PAGE_SIZE,
             'pageNumber': page_number
         }
         url_with_params = f"{url}?{urllib.parse.urlencode(params)}"
@@ -276,85 +269,29 @@ def get_all_voicemails(access_token, region_host):
         
         entities = data.get('entities', [])
         
-        # Get pageCount from first request
-        if page_number == 1:
-            api_page_count = data.get('pageCount', 1)
-            api_total = data.get('total', 0)
-            app.logger.info(
-                f"API reports: total={api_total}, pageCount={api_page_count} "
-                f"(will filter deleted, deduplicate, and count actual)"
-            )
-        
-        # If page is empty, we're done
         if not entities:
-            app.logger.debug(f"Page {page_number} is empty, stopping")
             break
         
-        # Filter out DELETED voicemails - FIXED LOGIC
-        page_active = []
-        page_deleted = 0
-        
+        # Simple filter: exclude deleted=true
         for vm in entities:
-            # Only filter if explicitly marked as deleted
-            deleted = vm.get('deleted')
-            deleted_date = vm.get('deletedDate')
-            
-            is_deleted = (deleted is True) or (deleted_date is not None and deleted_date != '')
-            
-            if is_deleted:
-                page_deleted += 1
-                app.logger.debug(f"Filtering deleted VM: {vm.get('id')[:8]} - deleted={deleted}, deletedDate={deleted_date}")
-            else:
-                page_active.append(vm)
+            if vm.get('deleted') != True:
+                all_voicemails.append(vm)
         
-        all_voicemails.extend(page_active)
-        
-        app.logger.debug(
-            f"Page {page_number}/{api_page_count}: "
-            f"{len(entities)} total, {len(page_active)} active, {page_deleted} deleted"
-        )
-        
-        # Stop if we've processed all pages
-        if api_page_count and page_number >= api_page_count:
-            app.logger.debug(f"Reached last page ({api_page_count})")
+        # Check if we're done
+        page_count = data.get('pageCount', 1)
+        if page_number >= page_count:
             break
         
         page_number += 1
-        time.sleep(0.05)  # Small delay between pages
+        time.sleep(0.05)
     
-    # CRITICAL: Deduplicate by ID (in case API returns duplicates)
-    vm_ids = [vm.get('id') for vm in all_voicemails]
-    unique_ids = set(vm_ids)
-    
-    if len(vm_ids) != len(unique_ids):
-        duplicates = len(vm_ids) - len(unique_ids)
-        app.logger.warning(f"Found {duplicates} duplicate IDs in pagination - deduplicating")
-        
-        # Deduplicate - keep first occurrence
-        seen = set()
-        deduped = []
-        for vm in all_voicemails:
-            vm_id = vm.get('id')
-            if vm_id not in seen:
-                seen.add(vm_id)
-                deduped.append(vm)
-        
-        all_voicemails = deduped
-        app.logger.info(f"After deduplication: {len(all_voicemails)} unique voicemails")
-    
-    # Sort by date descending (newest first)
+    # Sort by date descending
     all_voicemails.sort(
         key=lambda vm: vm.get('createdDate', '') or '', 
         reverse=True
     )
     
-    # THE TRUE COUNT - from actual deduplicated entities
-    actual_count = len(all_voicemails)
-    
-    app.logger.info(
-        f"✓ ACTUAL COUNT: {actual_count} active voicemails "
-        f"(from {page_number - 1} pages, filtered deleted, deduplicated)"
-    )
+    app.logger.info(f"Fetched {len(all_voicemails)} non-deleted voicemails")
     
     return all_voicemails, None
 
@@ -955,31 +892,32 @@ def callback():
 @login_required
 def dashboard():
     """
-    Main dashboard - shows voicemails with ACCURATE count from actual pagination.
-    PAGINATION IS THE SOURCE OF TRUTH - /mailbox endpoint is stale/unreliable.
+    Dashboard with stats from /mailbox and list from /me/messages
     """
     access_token = session.get('access_token')
     region_host = session.get('region_host')
     region_key = session.get('region_key')
     user_info = session.get('user_info', {})
     
-    # Get page number from query params
+    # Get page number
     page = request.args.get('page', 1, type=int)
     if page < 1:
         page = 1
     
-    # Fetch ALL voicemails - THIS is the source of truth for count
+    # Get stats from /mailbox API (accurate count)
+    stats = get_voicemail_stats(access_token, region_host)
+    if not stats:
+        stats = {'total': 0, 'unread': 0, 'deleted': 0}
+    
+    total_count = stats['total']
+    unread_count = stats['unread']
+    
+    # Fetch all voicemails for display
     all_voicemails, error = get_all_voicemails(access_token, region_host)
     
     if error:
         flash(f'Error fetching voicemails: {error}', 'warning')
         all_voicemails = []
-    
-    # TRUE COUNT from actual pagination (deduplicated, filtered)
-    total_count = len(all_voicemails)
-    
-    # Calculate unread from actual data
-    unread_count = sum(1 for vm in all_voicemails if not vm.get('read', True))
     
     # Calculate pagination
     total_pages = (
@@ -997,10 +935,10 @@ def dashboard():
     end_idx = start_idx + DISPLAY_PAGE_SIZE
     page_voicemails = all_voicemails[start_idx:end_idx]
     
-    # Format voicemails for display
+    # Format for display
     processed_voicemails = [format_voicemail(vm) for vm in page_voicemails]
     
-    # Calculate stats from fetched data
+    # Calculate total duration from fetched data
     total_duration = sum(
         vm.get('audioRecordingDurationSeconds', 0) or 0 
         for vm in all_voicemails
@@ -1011,9 +949,9 @@ def dashboard():
                          user_info=user_info,
                          region=REGIONS.get(region_key, {}),
                          voicemails=processed_voicemails,
-                         voicemail_count=total_count,  # From pagination (TRUTH)
+                         voicemail_count=total_count,  # From /mailbox
                          total_duration_minutes=total_duration_minutes,
-                         unread_count=unread_count,  # From actual data
+                         unread_count=unread_count,  # From /mailbox
                          current_page=page,
                          total_pages=total_pages,
                          has_prev=page > 1,
