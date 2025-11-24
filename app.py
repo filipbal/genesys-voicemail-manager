@@ -895,7 +895,7 @@ def callback():
 @login_required
 def dashboard():
     """
-    Dashboard with stats from /mailbox and list from /me/messages
+    Dashboard with stats and list from /me/messages
     """
     access_token = session.get('access_token')
     region_host = session.get('region_host')
@@ -907,20 +907,16 @@ def dashboard():
     if page < 1:
         page = 1
     
-    # Get stats from /mailbox API (accurate count)
-    stats = get_voicemail_stats(access_token, region_host)
-    if not stats:
-        stats = {'total': 0, 'unread': 0, 'deleted': 0}
-    
-    total_count = stats['total']
-    unread_count = stats['unread']
-    
     # Fetch all voicemails for display
     all_voicemails, error = get_all_voicemails(access_token, region_host)
     
     if error:
         flash(f'Error fetching voicemails: {error}', 'warning')
         all_voicemails = []
+    
+    # Calculate counts from actual data (most accurate)
+    total_count = len(all_voicemails)
+    unread_count = sum(1 for vm in all_voicemails if not vm.get('read', True))
     
     # Calculate pagination
     total_pages = (
@@ -952,9 +948,9 @@ def dashboard():
                          user_info=user_info,
                          region=REGIONS.get(region_key, {}),
                          voicemails=processed_voicemails,
-                         voicemail_count=total_count,  # From /mailbox
+                         voicemail_count=total_count,
                          total_duration_minutes=total_duration_minutes,
-                         unread_count=unread_count,  # From /mailbox
+                         unread_count=unread_count,
                          current_page=page,
                          total_pages=total_pages,
                          has_prev=page > 1,
@@ -963,7 +959,6 @@ def dashboard():
                          start_idx=start_idx + 1 if total_count > 0 else 0,
                          end_idx=min(end_idx, total_count),
                          enable_downloads=ENABLE_DOWNLOADS)
-
 
 @app.route('/download/<message_id>')
 @login_required
