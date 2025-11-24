@@ -1,19 +1,18 @@
 #!/usr/bin/env python3
 """
-Genesys Cloud Voicemail Web Exporter - IMPROVED VERSION v7
+Genesys Cloud Voicemail Web Exporter - IMPROVED VERSION v8
 ==========================================================
-NEW FEATURES:
-1. Dedicated Download page with selection UI
-2. Streaming progress for bulk downloads
-3. 5-column dashboard with Delete All button
-4. Better progress feedback during long operations
+CHANGES FROM v7:
+- Removed retry logic to prevent duplicate forwards/deletes
+- Updated rate limiting delays to stay within Genesys 300/min PKCE limit
+- Fail-fast approach: operation succeeds or fails cleanly, no retries
+- Clear error reporting to user for failed operations
 
-CHANGES FROM v6:
-- Added /download route for bulk download page
-- Added streaming progress via Server-Sent Events (SSE)
-- Updated dashboard.html for 5-column layout
-- Added templates/download.html
-- Improved batch download with progress tracking
+Rate Limiting Strategy:
+- OPERATION_DELAY = 0.4s (2.5 calls/sec = 150/min, 50% of 300/min limit)
+- BATCH_DELAY = 2.0s between batches
+- SUPER_BATCH_DELAY = 8.0s every 5 batches
+- No retries - if API call fails, log error and continue
 """
 
 import os
@@ -76,14 +75,12 @@ ENABLE_DOWNLOADS = True  # Set to False to disable all download functionality
 API_PAGE_SIZE = 50  # Max items per API page (Genesys limit for /me/messages)
 DISPLAY_PAGE_SIZE = 50  # Items per UI page
 
-# Batch processing settings
+# Batch processing settings - optimized for Genesys PKCE 300 req/min limit
 BATCH_SIZE = 25
-BATCH_DELAY = 2.0
-OPERATION_DELAY = 0.4
-RATE_LIMIT_BACKOFF = 10.0
-MAX_RETRIES = 5
-SUPER_BATCH_SIZE = 5
-SUPER_BATCH_DELAY = 8.0
+BATCH_DELAY = 2.0           # Seconds between batches
+OPERATION_DELAY = 0.4       # Seconds between API calls (2.5 calls/sec = 150/min)
+SUPER_BATCH_SIZE = 5        # Batches before super break
+SUPER_BATCH_DELAY = 8.0     # Seconds for super break
 
 # Download-specific settings
 DOWNLOAD_BATCH_SIZE = 10  # Smaller batches for downloads (media files are larger)
@@ -169,11 +166,14 @@ def exchange_code_for_token(auth_code, region_host, code_verifier):
 
 
 # ============================================================================
-# API REQUEST HELPER
+# API REQUEST HELPER - NO RETRY LOGIC
 # ============================================================================
 
-def make_api_request(url, access_token, method='GET', data=None, retries=MAX_RETRIES):
-    """Make API request with retry logic for rate limiting"""
+def make_api_request(url, access_token, method='GET', data=None):
+    """
+    Make API request with NO retry logic.
+    Fails fast on any error to prevent duplicates.
+    """
     req = urllib.request.Request(url, method=method)
     req.add_header('Authorization', f'Bearer {access_token}')
     
@@ -189,23 +189,15 @@ def make_api_request(url, access_token, method='GET', data=None, retries=MAX_RET
             return json.loads(response.read().decode()), None
             
     except urllib.request.HTTPError as e:
-        # Handle rate limiting with retry
-        if e.code == 429 and retries > 0:
-            retry_after = e.headers.get('Retry-After', RATE_LIMIT_BACKOFF)
-            try:
-                wait_time = float(retry_after)
-            except:
-                wait_time = RATE_LIMIT_BACKOFF
-            
-            app.logger.warning(f"Rate limited (429). Waiting {wait_time}s. Retries left: {retries-1}")
-            time.sleep(wait_time)
-            return make_api_request(url, access_token, method, data, retries - 1)
-        
         try:
             error_body = json.loads(e.read().decode())
             error_msg = error_body.get('message', str(error_body))
         except:
             error_msg = f"HTTP {e.code}: {e.reason}"
+        
+        # Log rate limiting for monitoring
+        if e.code == 429:
+            app.logger.warning(f"Rate limit hit (429) - URL: {url}")
         
         return None, error_msg
         
@@ -444,19 +436,22 @@ def delete_voicemail_single(access_token, region_host, voicemail_id):
 
 
 # ============================================================================
-# BATCH OPERATIONS
+# BATCH OPERATIONS - NO RETRY LOGIC
 # ============================================================================
 
 def process_voicemails_in_batches(access_token, region_host, voicemail_ids, operation, 
                                    target_id=None, target_type='user', progress_id=None):
     """
-    Process voicemails in batches to avoid rate limiting.
+    Process voicemails in batches with fail-fast approach (no retries).
     
     Args:
         operation: 'forward' or 'delete'
         target_id: Required for forward operation
         target_type: 'user' or 'group' for forward operation
         progress_id: Optional ID for progress tracking via SSE
+        
+    Returns:
+        dict with success/failed counts and detailed error list
     """
     results = {
         'success': 0,
@@ -469,7 +464,6 @@ def process_voicemails_in_batches(access_token, region_host, voicemail_ids, oper
     total_ids = len(voicemail_ids)
     total_batches = (total_ids + BATCH_SIZE - 1) // BATCH_SIZE
     batches_since_super_break = 0
-    consecutive_failures = 0
     
     app.logger.info(f"Starting {operation}: {total_ids} items in {total_batches} batches")
     
@@ -493,9 +487,6 @@ def process_voicemails_in_batches(access_token, region_host, voicemail_ids, oper
             app.logger.info(f"Super batch break: {SUPER_BATCH_DELAY}s...")
             time.sleep(SUPER_BATCH_DELAY)
             batches_since_super_break = 0
-            consecutive_failures = 0
-        
-        batch_failures = 0
         
         # Process each item in the batch
         for idx, vm_id in enumerate(batch):
@@ -511,19 +502,10 @@ def process_voicemails_in_batches(access_token, region_host, voicemail_ids, oper
                 
                 if success:
                     results['success'] += 1
-                    consecutive_failures = 0
                 else:
                     results['failed'] += 1
-                    results['errors'].append(f"{vm_id[:8]}: {result}")
-                    batch_failures += 1
-                    consecutive_failures += 1
-                    
-                    # If we have many consecutive failures, take a longer break
-                    if consecutive_failures >= 3:
-                        app.logger.warning("Multiple consecutive failures, taking extended break...")
-                        time.sleep(SUPER_BATCH_DELAY * 2)
-                        consecutive_failures = 0
-                        batches_since_super_break = 0
+                    # Include voicemail ID prefix in error for debugging
+                    results['errors'].append(f"VM {vm_id[:8]}: {result}")
                 
                 results['processed'] += 1
                 
@@ -541,7 +523,7 @@ def process_voicemails_in_batches(access_token, region_host, voicemail_ids, oper
                     
             except Exception as e:
                 results['failed'] += 1
-                results['errors'].append(f"{vm_id[:8]}: {str(e)}")
+                results['errors'].append(f"VM {vm_id[:8]}: Exception - {str(e)}")
                 results['processed'] += 1
                 
                 if progress_id:
@@ -552,11 +534,10 @@ def process_voicemails_in_batches(access_token, region_host, voicemail_ids, oper
         
         batches_since_super_break += 1
         
-        # Delay between batches (longer if batch had failures)
+        # Delay between batches
         if batch_end < total_ids:
-            delay = BATCH_DELAY * 2 if batch_failures > 0 else BATCH_DELAY
-            app.logger.debug(f"Batch {batch_num}/{total_batches} complete, waiting {delay}s...")
-            time.sleep(delay)
+            app.logger.debug(f"Batch {batch_num}/{total_batches} complete, waiting {BATCH_DELAY}s...")
+            time.sleep(BATCH_DELAY)
     
     # Mark progress as complete
     if progress_id:
@@ -1419,7 +1400,7 @@ def api_search_groups():
 @app.route('/api/forward', methods=['POST'])
 @login_required
 def api_forward_voicemails():
-    """Forward voicemails in batches"""
+    """Forward voicemails in batches - fail-fast, no retries"""
     access_token = session.get('access_token')
     region_host = session.get('region_host')
     
@@ -1434,7 +1415,7 @@ def api_forward_voicemails():
     if not voicemail_ids or not target_id:
         return jsonify({'success': False, 'error': 'Missing required data'}), 400
     
-    # Process in batches
+    # Process in batches with fail-fast approach
     results = process_voicemails_in_batches(
         access_token, region_host, voicemail_ids, 'forward',
         target_id=target_id, target_type=target_type
@@ -1445,14 +1426,14 @@ def api_forward_voicemails():
         'forwarded': results['success'],
         'failed': results['failed'],
         'total': results['total'],
-        'errors': results['errors'][:10]  # Limit errors to first 10
+        'errors': results['errors'][:20]  # Show up to 20 errors
     })
 
 
 @app.route('/api/delete', methods=['POST'])
 @login_required
 def api_delete_voicemails():
-    """Delete voicemails in batches"""
+    """Delete voicemails in batches - fail-fast, no retries"""
     access_token = session.get('access_token')
     region_host = session.get('region_host')
     
@@ -1465,7 +1446,7 @@ def api_delete_voicemails():
     if not voicemail_ids:
         return jsonify({'success': False, 'error': 'No voicemails selected'}), 400
     
-    # Process in batches
+    # Process in batches with fail-fast approach
     results = process_voicemails_in_batches(
         access_token, region_host, voicemail_ids, 'delete'
     )
@@ -1475,7 +1456,7 @@ def api_delete_voicemails():
         'deleted': results['success'],
         'failed': results['failed'],
         'total': results['total'],
-        'errors': results['errors'][:10]  # Limit errors to first 10
+        'errors': results['errors'][:20]  # Show up to 20 errors
     })
 
 
@@ -1570,7 +1551,7 @@ def health():
     """Health check endpoint"""
     return jsonify({
         'status': 'healthy',
-        'version': 'v7-improved-download-progress',
+        'version': 'v8-no-retry-optimized-delays',
         'timestamp': datetime.now().isoformat()
     })
 
