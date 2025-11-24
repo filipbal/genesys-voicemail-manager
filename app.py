@@ -290,19 +290,20 @@ def get_all_voicemails(access_token, region_host):
             app.logger.debug(f"Page {page_number} is empty, stopping")
             break
         
-        # Filter out DELETED voicemails
+        # Filter out DELETED voicemails - FIXED LOGIC
         page_active = []
         page_deleted = 0
         
         for vm in entities:
-            is_deleted = (
-                vm.get('deleted', False) or
-                vm.get('state', '').upper() == 'DELETED' or
-                vm.get('deletedDate') is not None
-            )
+            # Only filter if explicitly marked as deleted
+            deleted = vm.get('deleted')
+            deleted_date = vm.get('deletedDate')
+            
+            is_deleted = (deleted is True) or (deleted_date is not None and deleted_date != '')
             
             if is_deleted:
                 page_deleted += 1
+                app.logger.debug(f"Filtering deleted VM: {vm.get('id')[:8]} - deleted={deleted}, deletedDate={deleted_date}")
             else:
                 page_active.append(vm)
         
