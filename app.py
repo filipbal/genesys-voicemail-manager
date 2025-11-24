@@ -243,10 +243,11 @@ def get_voicemail_stats(access_token, region_host):
 
 def get_all_voicemails(access_token, region_host):
     """
-    Get ALL voicemails with filtering.
+    Get ALL voicemails with filtering - THE SOURCE OF TRUTH.
     
     Uses /api/v2/voicemail/me/messages endpoint (self-service, user's own voicemails).
     Filters out soft-deleted voicemails manually.
+    Deduplicates by ID to ensure accurate count.
     
     Returns: (list of all active voicemails sorted by date desc, error)
     """
@@ -281,7 +282,7 @@ def get_all_voicemails(access_token, region_host):
             api_total = data.get('total', 0)
             app.logger.info(
                 f"API reports: total={api_total}, pageCount={api_page_count} "
-                f"(will filter deleted and count actual)"
+                f"(will filter deleted, deduplicate, and count actual)"
             )
         
         # If page is empty, we're done
@@ -320,18 +321,38 @@ def get_all_voicemails(access_token, region_host):
         page_number += 1
         time.sleep(0.05)  # Small delay between pages
     
+    # CRITICAL: Deduplicate by ID (in case API returns duplicates)
+    vm_ids = [vm.get('id') for vm in all_voicemails]
+    unique_ids = set(vm_ids)
+    
+    if len(vm_ids) != len(unique_ids):
+        duplicates = len(vm_ids) - len(unique_ids)
+        app.logger.warning(f"Found {duplicates} duplicate IDs in pagination - deduplicating")
+        
+        # Deduplicate - keep first occurrence
+        seen = set()
+        deduped = []
+        for vm in all_voicemails:
+            vm_id = vm.get('id')
+            if vm_id not in seen:
+                seen.add(vm_id)
+                deduped.append(vm)
+        
+        all_voicemails = deduped
+        app.logger.info(f"After deduplication: {len(all_voicemails)} unique voicemails")
+    
     # Sort by date descending (newest first)
     all_voicemails.sort(
         key=lambda vm: vm.get('createdDate', '') or '', 
         reverse=True
     )
     
-    # Count from actual fetched entities
+    # THE TRUE COUNT - from actual deduplicated entities
     actual_count = len(all_voicemails)
     
     app.logger.info(
-        f"✓ Fetched {actual_count} active voicemails "
-        f"(from {page_number - 1} pages, filtered out deleted)"
+        f"✓ ACTUAL COUNT: {actual_count} active voicemails "
+        f"(from {page_number - 1} pages, filtered deleted, deduplicated)"
     )
     
     return all_voicemails, None
@@ -933,7 +954,8 @@ def callback():
 @login_required
 def dashboard():
     """
-    Main dashboard - shows voicemails with ACCURATE count from /mailbox endpoint.
+    Main dashboard - shows voicemails with ACCURATE count from actual pagination.
+    PAGINATION IS THE SOURCE OF TRUTH - /mailbox endpoint is stale/unreliable.
     """
     access_token = session.get('access_token')
     region_host = session.get('region_host')
@@ -945,24 +967,20 @@ def dashboard():
     if page < 1:
         page = 1
     
-    # Get accurate count from /mailbox endpoint (source of truth)
-    stats = get_voicemail_stats(access_token, region_host)
-    if stats:
-        total_count = stats['total']
-        unread_count = stats['unread']
-    else:
-        total_count = 0
-        unread_count = 0
-        flash('Could not fetch voicemail statistics', 'warning')
-    
-    # Fetch ALL voicemails for display
+    # Fetch ALL voicemails - THIS is the source of truth for count
     all_voicemails, error = get_all_voicemails(access_token, region_host)
     
     if error:
         flash(f'Error fetching voicemails: {error}', 'warning')
         all_voicemails = []
     
-    # Calculate pagination using mailbox count
+    # TRUE COUNT from actual pagination (deduplicated, filtered)
+    total_count = len(all_voicemails)
+    
+    # Calculate unread from actual data
+    unread_count = sum(1 for vm in all_voicemails if not vm.get('read', True))
+    
+    # Calculate pagination
     total_pages = (
         (total_count + DISPLAY_PAGE_SIZE - 1) // DISPLAY_PAGE_SIZE 
         if total_count > 0 
@@ -992,9 +1010,9 @@ def dashboard():
                          user_info=user_info,
                          region=REGIONS.get(region_key, {}),
                          voicemails=processed_voicemails,
-                         voicemail_count=total_count,  # From /mailbox
+                         voicemail_count=total_count,  # From pagination (TRUTH)
                          total_duration_minutes=total_duration_minutes,
-                         unread_count=unread_count,  # From /mailbox
+                         unread_count=unread_count,  # From actual data
                          current_page=page,
                          total_pages=total_pages,
                          has_prev=page > 1,
@@ -1055,11 +1073,7 @@ def download_page():
     region_key = session.get('region_key')
     user_info = session.get('user_info', {})
     
-    # Get accurate count from /mailbox
-    stats = get_voicemail_stats(access_token, region_host)
-    total_count = stats['total'] if stats else 0
-    
-    # Get all voicemails
+    # Get all voicemails - pagination is source of truth
     all_voicemails, error = get_all_voicemails(access_token, region_host)
     
     if error:
@@ -1067,12 +1081,13 @@ def download_page():
         all_voicemails = []
     
     processed_voicemails = [format_voicemail(vm) for vm in all_voicemails]
+    total_count = len(processed_voicemails)
     
     return render_template('download.html',
                          user_info=user_info,
                          region=REGIONS.get(region_key, {}),
                          voicemails=processed_voicemails,
-                         voicemail_count=total_count,  # From /mailbox
+                         voicemail_count=total_count,  # From pagination
                          batch_size=DOWNLOAD_BATCH_SIZE,
                          batch_download_size=BATCH_DOWNLOAD_SIZE)
 
@@ -1316,11 +1331,7 @@ def forward_page():
     region_key = session.get('region_key')
     user_info = session.get('user_info', {})
     
-    # Get accurate count from /mailbox
-    stats = get_voicemail_stats(access_token, region_host)
-    total_count = stats['total'] if stats else 0
-    
-    # Get all voicemails
+    # Get all voicemails - pagination is source of truth
     all_voicemails, error = get_all_voicemails(access_token, region_host)
     
     if error:
@@ -1328,12 +1339,13 @@ def forward_page():
         all_voicemails = []
     
     processed_voicemails = [format_voicemail(vm) for vm in all_voicemails]
+    total_count = len(processed_voicemails)
     
     return render_template('forward.html',
                          user_info=user_info,
                          region=REGIONS.get(region_key, {}),
                          voicemails=processed_voicemails,
-                         voicemail_count=total_count,  # From /mailbox
+                         voicemail_count=total_count,  # From pagination
                          batch_size=BATCH_SIZE)
 
 
@@ -1346,11 +1358,7 @@ def delete_page():
     region_key = session.get('region_key')
     user_info = session.get('user_info', {})
     
-    # Get accurate count from /mailbox
-    stats = get_voicemail_stats(access_token, region_host)
-    total_count = stats['total'] if stats else 0
-    
-    # Get all voicemails
+    # Get all voicemails - pagination is source of truth
     all_voicemails, error = get_all_voicemails(access_token, region_host)
     
     if error:
@@ -1358,12 +1366,13 @@ def delete_page():
         all_voicemails = []
     
     processed_voicemails = [format_voicemail(vm) for vm in all_voicemails]
+    total_count = len(processed_voicemails)
     
     return render_template('delete.html',
                          user_info=user_info,
                          region=REGIONS.get(region_key, {}),
                          voicemails=processed_voicemails,
-                         voicemail_count=total_count,  # From /mailbox
+                         voicemail_count=total_count,  # From pagination
                          batch_size=BATCH_SIZE)
 
 
@@ -1493,7 +1502,7 @@ def api_delete_voicemails():
 @app.route('/api/voicemails')
 @login_required
 def api_voicemails():
-    """Get voicemails list (JSON API) with accurate count from /mailbox"""
+    """Get voicemails list (JSON API) - pagination is source of truth"""
     access_token = session.get('access_token')
     region_host = session.get('region_host')
     
@@ -1501,16 +1510,13 @@ def api_voicemails():
     page_size = request.args.get('page_size', DISPLAY_PAGE_SIZE, type=int)
     page_size = min(max(page_size, 10), 100)  # Clamp between 10 and 100
     
-    # Get accurate count from /mailbox
-    stats = get_voicemail_stats(access_token, region_host)
-    total_count = stats['total'] if stats else 0
-    
-    # Get all voicemails
+    # Get all voicemails - pagination is source of truth
     all_voicemails, error = get_all_voicemails(access_token, region_host)
     
     if error:
         return jsonify({'error': error}), 500
     
+    total_count = len(all_voicemails)
     total_pages = (total_count + page_size - 1) // page_size if total_count > 0 else 1
     
     # Get page of voicemails
@@ -1531,7 +1537,7 @@ def api_voicemails():
     return jsonify({
         'voicemails': processed,
         'count': len(processed),
-        'total_count': total_count,  # From /mailbox
+        'total_count': total_count,  # From pagination
         'page': page,
         'page_size': page_size,
         'total_pages': total_pages,
@@ -1543,20 +1549,18 @@ def api_voicemails():
 @app.route('/api/voicemails/stats')
 @login_required
 def api_voicemail_stats():
-    """Get voicemail statistics from /mailbox endpoint"""
+    """Get voicemail statistics from actual pagination data"""
     access_token = session.get('access_token')
     region_host = session.get('region_host')
     
-    stats = get_voicemail_stats(access_token, region_host)
-    
-    if not stats:
-        return jsonify({'error': 'Failed to fetch stats'}), 500
-    
-    # Get all voicemails for duration calculation
+    # Get all voicemails - pagination is source of truth
     all_voicemails, error = get_all_voicemails(access_token, region_host)
     
     if error:
         return jsonify({'error': error}), 500
+    
+    total_count = len(all_voicemails)
+    unread_count = sum(1 for vm in all_voicemails if not vm.get('read', True))
     
     total_duration = sum(
         vm.get('audioRecordingDurationSeconds', 0) or 0 
@@ -1564,9 +1568,8 @@ def api_voicemail_stats():
     )
     
     return jsonify({
-        'total_count': stats['total'],
-        'unread_count': stats['unread'],
-        'deleted_count': stats['deleted'],  # Soft-deleted count
+        'total_count': total_count,  # From pagination
+        'unread_count': unread_count,  # From actual data
         'total_duration_seconds': total_duration,
         'total_duration_minutes': round(total_duration / 60, 1) if total_duration else 0
     })
@@ -1589,7 +1592,7 @@ def health():
     """Health check endpoint"""
     return jsonify({
         'status': 'healthy',
-        'version': 'v8-mailbox-accurate-counts',
+        'version': 'v9-pagination-source-of-truth',
         'timestamp': datetime.now().isoformat()
     })
 
