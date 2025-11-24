@@ -243,18 +243,18 @@ def get_voicemail_stats(access_token, region_host):
 
 def get_all_voicemails(access_token, region_host):
     """
-    Get ALL non-deleted voicemails.
-    Simple: fetch all pages, filter deleted=true, return list.
+    Get ALL non-deleted voicemails including forwarded ones.
+    Uses /api/v2/voicemail/messages (without 'me') to get everything.
     """
     all_voicemails = []
     page_number = 1
     
-    app.logger.info("Fetching voicemails from /me/messages...")
+    app.logger.info("Fetching ALL voicemails including forwarded from /voicemail/messages...")
     
     while page_number <= MAX_PAGES:
-        url = f"https://api.{region_host}/api/v2/voicemail/me/messages"
+        url = f"https://api.{region_host}/api/v2/voicemail/messages"
         params = {
-            'pageSize': API_PAGE_SIZE,
+            'pageSize': 50,
             'pageNumber': page_number
         }
         url_with_params = f"{url}?{urllib.parse.urlencode(params)}"
@@ -268,30 +268,27 @@ def get_all_voicemails(access_token, region_host):
             break
         
         entities = data.get('entities', [])
+        page_count = data.get('pageCount', 1)
+        
+        app.logger.info(f"Page {page_number}/{page_count}: got {len(entities)} voicemails")
         
         if not entities:
             break
         
-        # Simple filter: exclude deleted=true
+        # Filter: exclude deleted=true
         for vm in entities:
-            if vm.get('deleted') != True:
+            if not vm.get('deleted'):
                 all_voicemails.append(vm)
         
-        # Check if we're done
-        page_count = data.get('pageCount', 1)
         if page_number >= page_count:
             break
         
         page_number += 1
         time.sleep(0.05)
     
-    # Sort by date descending
-    all_voicemails.sort(
-        key=lambda vm: vm.get('createdDate', '') or '', 
-        reverse=True
-    )
+    all_voicemails.sort(key=lambda vm: vm.get('createdDate', ''), reverse=True)
     
-    app.logger.info(f"Fetched {len(all_voicemails)} non-deleted voicemails")
+    app.logger.info(f"✓ Fetched {len(all_voicemails)} non-deleted voicemails (including forwarded)")
     
     return all_voicemails, None
 
