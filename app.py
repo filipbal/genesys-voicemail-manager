@@ -75,12 +75,11 @@ ENABLE_DOWNLOADS = True  # Set to False to disable all download functionality
 API_PAGE_SIZE = 50  # Max items per API page (Genesys limit for /me/messages)
 DISPLAY_PAGE_SIZE = 50  # Items per UI page
 
-# Batch processing settings - optimized for Genesys PKCE 300 req/min limit
 BATCH_SIZE = 25
-BATCH_DELAY = 2.0           # Seconds between batches
-OPERATION_DELAY = 0.4       # Seconds between API calls (2.5 calls/sec = 150/min)
-SUPER_BATCH_SIZE = 5        # Batches before super break
-SUPER_BATCH_DELAY = 8.0     # Seconds for super break
+OPERATION_DELAY = 0.25      # 4 calls/sec = 240/min (80% of 300/min limit)
+BATCH_DELAY = 1.0           # Reduced from 2.0
+SUPER_BATCH_SIZE = 5
+SUPER_BATCH_DELAY = 5.0     # Reduced from 8.0
 
 # Download-specific settings
 DOWNLOAD_BATCH_SIZE = 10  # Smaller batches for downloads (media files are larger)
