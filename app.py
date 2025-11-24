@@ -244,7 +244,7 @@ def get_voicemail_stats(access_token, region_host):
 def get_all_voicemails(access_token, region_host):
     """
     Get ALL non-deleted voicemails by actually counting them.
-    Don't trust API's 'total' - it's rounded to page size.
+    Don't trust API's 'total' or 'pageCount' - fetch until empty page.
     """
     all_voicemails = []
     page_number = 1
@@ -268,9 +268,8 @@ def get_all_voicemails(access_token, region_host):
             break
         
         entities = data.get('entities', [])
-        page_count = data.get('pageCount', 1)
         
-        # STOP if we get an empty page
+        # STOP if we get an empty page - this is the ONLY reliable way
         if not entities:
             app.logger.info(f"Empty page at {page_number}, stopping")
             break
@@ -284,10 +283,7 @@ def get_all_voicemails(access_token, region_host):
         
         app.logger.info(f"Page {page_number}: {non_deleted_count} non-deleted out of {len(entities)}")
         
-        # Stop if we've processed all pages
-        if page_number >= page_count:
-            break
-        
+        # IMPORTANT: Don't trust pageCount, keep going until empty page
         page_number += 1
         time.sleep(0.05)
     
