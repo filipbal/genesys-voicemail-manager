@@ -144,7 +144,7 @@
                 <tbody>
                     {% for vm in voicemails %}
                     <tr class="voicemail-row {% if not vm.read %}voicemail-unread{% endif %}">
-                        <td>{{ loop.index }}</td>
+                        <td>{{ start_idx + loop.index0 }}</td>
                         <td>
                             <i class="bi bi-person me-1 text-muted"></i>
                             {{ vm.caller_name }}
