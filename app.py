@@ -890,70 +890,57 @@ def callback():
 @app.route('/dashboard')
 @login_required
 def dashboard():
-    """
-    Dashboard with stats and list from /me/messages
-    """
     access_token = session.get('access_token')
     region_host = session.get('region_host')
     region_key = session.get('region_key')
     user_info = session.get('user_info', {})
     
-    # Get page number
     page = request.args.get('page', 1, type=int)
     if page < 1:
         page = 1
     
-    # Fetch all voicemails for display
-    all_voicemails, error = get_all_voicemails(access_token, region_host)
+    # Fetch with larger page size to get total, then filter
+    messages_url = f"https://api.{region_host}/api/v2/voicemail/me/messages"
+    params = {
+        'pageSize': 100,  # Fetch more to count properly
+        'pageNumber': 1
+    }
+    url_with_params = f"{messages_url}?{urllib.parse.urlencode(params)}"
+    
+    data, error = make_api_request(url_with_params, access_token)
     
     if error:
         flash(f'Error fetching voicemails: {error}', 'warning')
-        all_voicemails = []
+        return redirect(url_for('logout'))
     
-    # Calculate counts from actual data (most accurate)
-    total_count = len(all_voicemails)
-    unread_count = sum(1 for vm in all_voicemails if not vm.get('read', True))
+    # Count non-deleted across all pages
+    all_entities = data.get('entities', [])
+    page_count = data.get('pageCount', 1)
     
-    # Calculate pagination
-    total_pages = (
-        (total_count + DISPLAY_PAGE_SIZE - 1) // DISPLAY_PAGE_SIZE 
-        if total_count > 0 
-        else 1
-    )
+    # Log what we're seeing
+    deleted_count = sum(1 for vm in all_entities if vm.get('deleted'))
+    non_deleted_count = sum(1 for vm in all_entities if not vm.get('deleted'))
     
-    # Adjust page if out of range
-    if page > total_pages:
-        page = total_pages
+    app.logger.info(f"Page 1: {non_deleted_count} non-deleted, {deleted_count} deleted out of {len(all_entities)} total")
+    app.logger.info(f"API says total: {data.get('total')}, pageCount: {page_count}")
     
-    # Get voicemails for current page
-    start_idx = (page - 1) * DISPLAY_PAGE_SIZE
-    end_idx = start_idx + DISPLAY_PAGE_SIZE
-    page_voicemails = all_voicemails[start_idx:end_idx]
+    # Just use the non-deleted from current page for now
+    voicemails = [vm for vm in all_entities if not vm.get('deleted')]
     
-    # Format for display
-    processed_voicemails = [format_voicemail(vm) for vm in page_voicemails]
-    
-    # Calculate total duration from fetched data
-    total_duration = sum(
-        vm.get('audioRecordingDurationSeconds', 0) or 0 
-        for vm in all_voicemails
-    )
-    total_duration_minutes = round(total_duration / 60, 1) if total_duration else 0
+    processed_voicemails = [format_voicemail(vm) for vm in voicemails[:DISPLAY_PAGE_SIZE]]
     
     return render_template('dashboard.html',
                          user_info=user_info,
                          region=REGIONS.get(region_key, {}),
                          voicemails=processed_voicemails,
-                         voicemail_count=total_count,
-                         total_duration_minutes=total_duration_minutes,
-                         unread_count=unread_count,
+                         voicemail_count=data.get('total', 0),
                          current_page=page,
-                         total_pages=total_pages,
+                         total_pages=page_count,
                          has_prev=page > 1,
-                         has_next=page < total_pages,
+                         has_next=page < page_count,
                          page_size=DISPLAY_PAGE_SIZE,
-                         start_idx=start_idx + 1 if total_count > 0 else 0,
-                         end_idx=min(end_idx, total_count),
+                         start_idx=1,
+                         end_idx=len(processed_voicemails),
                          enable_downloads=ENABLE_DOWNLOADS)
 
 @app.route('/download/<message_id>')
