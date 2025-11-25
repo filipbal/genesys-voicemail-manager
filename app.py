@@ -245,18 +245,20 @@ def get_voicemail_stats(access_token, region_host):
 
 def get_all_voicemails(access_token, region_host):
     """
-    Get ALL non-deleted voicemails from user's inbox.
-    Uses /api/v2/voicemail/me/messages to get only user's voicemails.
+    Get ALL non-deleted voicemails from user's inbox using pagination.
+    Uses /api/v2/voicemail/me/messages with proper pagination support.
+    Filters out soft-deleted messages.
     """
     all_voicemails = []
     page_number = 1
+    page_size = 20  # Use 20 per page as requested
     
     app.logger.info("Fetching user's voicemails from inbox...")
     
     while page_number <= MAX_PAGES:
         url = f"https://api.{region_host}/api/v2/voicemail/me/messages"
         params = {
-            'pageSize': 100,  # Max allowed
+            'pageSize': page_size,
             'pageNumber': page_number
         }
         url_with_params = f"{url}?{urllib.parse.urlencode(params)}"
@@ -270,29 +272,35 @@ def get_all_voicemails(access_token, region_host):
             break
         
         entities = data.get('entities', [])
+        total_from_api = data.get('total', 0)
+        page_count = data.get('pageCount', 0)
         
-        # STOP if we get an empty page - this is the ONLY reliable way
+        # Stop if no entities
         if not entities:
             app.logger.info(f"Empty page at {page_number}, stopping")
             break
         
-        # Count actual non-deleted voicemails
-        non_deleted_count = 0
-        for vm in entities:
-            if not vm.get('deleted'):
-                all_voicemails.append(vm)
-                non_deleted_count += 1
+        # Filter out deleted messages and add to collection
+        non_deleted = [vm for vm in entities if not vm.get('deleted', False)]
+        all_voicemails.extend(non_deleted)
         
-        app.logger.info(f"Page {page_number}: {non_deleted_count} non-deleted out of {len(entities)}")
+        app.logger.info(
+            f"Page {page_number}/{page_count}: "
+            f"{len(non_deleted)} non-deleted out of {len(entities)} total"
+        )
         
-        # IMPORTANT: Don't trust pageCount, keep going until empty page
+        # Stop if we've reached the last page
+        if page_number >= page_count:
+            break
+        
         page_number += 1
-        time.sleep(0.05)
+        time.sleep(0.05)  # Small delay between API calls
     
+    # Sort by date descending (newest first)
     all_voicemails.sort(key=lambda vm: vm.get('createdDate', ''), reverse=True)
     
     actual_count = len(all_voicemails)
-    app.logger.info(f"✓ ACTUAL count: {actual_count} non-deleted voicemails from user's inbox")
+    app.logger.info(f"✓ Total: {actual_count} non-deleted voicemails")
     
     return all_voicemails, None
 
