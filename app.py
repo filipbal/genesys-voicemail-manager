@@ -68,7 +68,7 @@ os.makedirs(TEMP_DIR, exist_ok=True)
 ENABLE_DOWNLOADS = True  # Set to False to disable all download functionality
 
 # API pagination
-API_PAGE_SIZE = 20  # Records per API call
+API_PAGE_SIZE = 50  # Records per API call
 
 # Batch operation sizes
 BATCH_SIZE = 20           # Forward/delete batch size
