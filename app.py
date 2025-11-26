@@ -44,24 +44,11 @@ app.config['PERMANENT_SESSION_LIFETIME'] = 3600
 # GENESYS CONFIGURATION
 # ============================================================================
 
-def load_config():
-	"""Load config from Env Vars or CICS.json"""
-	c_id = os.environ.get('GENESYS_CLIENT_ID')
-	
-	# Try CICS.json if env var is missing
-	if not c_id and os.path.exists('CICS.json'):
-		try:
-			with open('CICS.json', 'r') as f:
-				creds = json.load(f)
-				# Handle Uppercase or CamelCase keys
-				c_id = creds.get('CLIENT_ID') or creds.get('clientId')
-				app.logger.info("Loaded Client ID from CICS.json")
-		except Exception as e:
-			app.logger.warning(f"Failed to load CICS.json: {e}")
+CLIENT_ID = os.environ.get('GENESYS_CLIENT_ID', '')
 
-	return c_id or ''
+if not CLIENT_ID:
+	CLIENT_ID = ''
 
-CLIENT_ID = load_config()
 REDIRECT_URI = os.environ.get('REDIRECT_URI', 'http://127.0.0.1:5000/callback')
 
 REGIONS = {
@@ -617,6 +604,46 @@ def dashboard():
 						 preview_count=len(preview),
 						 total_duration_minutes=round(total_sec/60, 1),
 						 enable_downloads=ENABLE_DOWNLOADS)
+
+@app.route('/download/<message_id>')
+@login_required
+def download_single(message_id):
+	"""Download a single voicemail as WAV file"""
+	if not ENABLE_DOWNLOADS:
+		flash('Download functionality is currently disabled.', 'warning')
+		return redirect(url_for('dashboard'))
+	
+	access_token = session.get('access_token')
+	region_host = session.get('region_host')
+	
+	# Note: We don't strictly need to fetch all voicemails just to get the filename for one,
+	# but we do need the metadata to construct a nice filename.
+	# To differ from bulk behavior (which fetches all), we'll just try to get the media directly
+	# or fetch this single message metadata if needed. 
+	# For simplicity and speed, we'll just download it. To get the filename, we'd ideally 
+	# query /api/v2/voicemail/messages/{id} but that adds an API call.
+	# Let's try to fetch the single message metadata first for the filename.
+	
+	meta_url = f"https://api.{region_host}/api/v2/voicemail/messages/{message_id}"
+	meta_data, meta_error = make_api_request(meta_url, access_token)
+	
+	if meta_error or not meta_data:
+		# Fallback if we can't get metadata (e.g. it's deleted)
+		filename = f"voicemail_{message_id}.wav"
+	else:
+		filename = format_filename(meta_data)
+	
+	media_bytes, error = download_voicemail_media(access_token, region_host, message_id)
+	
+	if error:
+		flash(f'Download failed: {error}', 'danger')
+		return redirect(url_for('dashboard'))
+	
+	return Response(
+		media_bytes,
+		mimetype='audio/wav',
+		headers={'Content-Disposition': f'attachment; filename="{filename}"'}
+	)
 
 @app.route('/download')
 @login_required
