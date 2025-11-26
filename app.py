@@ -719,6 +719,7 @@ def download_page():
 @app.route('/download-prepare', methods=['POST'])
 @login_required
 def download_prepare():
+	schedule_keepalive()
 	data = request.get_json()
 	ids = set(data.get('voicemail_ids', []))
 	
@@ -816,6 +817,7 @@ def delete_page():
 @app.route('/api/forward', methods=['POST'])
 @login_required
 def api_forward():
+	schedule_keepalive()
 	data = request.get_json()
 	ids = data.get('voicemail_ids', [])
 	res = process_voicemails_in_batches(
@@ -827,6 +829,7 @@ def api_forward():
 @app.route('/api/delete', methods=['POST'])
 @login_required
 def api_delete():
+	schedule_keepalive()
 	data = request.get_json()
 	ids = data.get('voicemail_ids', [])
 	res = process_voicemails_in_batches(
@@ -879,6 +882,16 @@ def datetime_filter(value):
 @app.template_filter('duration')
 def duration_filter(value):
 	return format_duration(value)
+
+def schedule_keepalive():
+    """Ping self after 14 min to prevent Render spin-down"""
+    def ping():
+        time.sleep(840)
+        try:
+            urllib.request.urlopen(request.host_url + "health", timeout=5)
+        except:
+            pass
+    threading.Thread(target=ping, daemon=True).start()
 
 if __name__ == '__main__':
 	app.run(debug=True, host='127.0.0.1', port=5000)
