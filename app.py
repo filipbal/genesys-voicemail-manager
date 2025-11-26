@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
 """
-Genesys Cloud Voicemail Web Exporter - v13
+Genesys Cloud Voicemail Web Exporter - v14
 ==========================================
-CHANGES FROM v12:
-- RATE LIMITING: Implemented PROACTIVE fixed delays (0.4s GET, 0.6s WRITE) to
-  respect the 300 req/min limit without hitting 429s.
-- PAGINATION: Uses `nextUri` traversal instead of pageCount loop.
-- DEDUPLICATION: Explicitly removes duplicate records (by ID) returned by API.
-- CONFIG: Loads credentials from CICS.json if env vars are missing.
+CHANGES FROM v13:
+- BUGFIX: Restored missing routes (/documentation, error handlers, filters) 
+  that were accidentally dropped in v13, causing BuildError on index load.
+- RETAINED: All v13 logic (Proactive Rate Limiting, nextUri pagination, Deduplication).
 """
 
 import os
@@ -771,7 +769,32 @@ def logout():
 
 @app.route('/health')
 def health():
-	return jsonify({'status': 'healthy', 'version': 'v13-fixed-delays'})
+	return jsonify({'status': 'healthy', 'version': 'v14-fixed-builderror'})
+
+@app.route('/documentation')
+def documentation():
+	"""Documentation page"""
+	return render_template('documentation.html')
+
+# ============================================================================
+# ERROR HANDLERS & FILTERS
+# ============================================================================
+
+@app.errorhandler(404)
+def not_found(e):
+	return render_template('error.html', error_code=404, error_message='Page not found'), 404
+
+@app.errorhandler(500)
+def server_error(e):
+	return render_template('error.html', error_code=500, error_message='Internal server error'), 500
+
+@app.template_filter('datetime')
+def datetime_filter(value):
+	return format_datetime(value)
+
+@app.template_filter('duration')
+def duration_filter(value):
+	return format_duration(value)
 
 if __name__ == '__main__':
 	app.run(debug=True, host='127.0.0.1', port=5000)
