@@ -66,7 +66,7 @@ os.makedirs(TEMP_DIR, exist_ok=True)
 ENABLE_DOWNLOADS = True
 
 # API Settings
-API_PAGE_SIZE = 50  # Max page size to reduce request count
+API_PAGE_SIZE = 100  # Max page size to reduce request count
 
 # PROACTIVE DELAYS (Seconds)
 # Limit is ~300 req/min (1 req every 0.2s). We use safer margins.
@@ -216,49 +216,75 @@ def get_user_info(access_token, region_host):
 		return None
 	return data
 
-def get_all_voicemails(access_token, region_host):
+def get_all_voicemails(access_token, region_host, user_id=None):
 	"""
-	Robust fetch of ALL voicemails.
-	1. Uses nextUri traversal (handles unknown page counts).
-	2. Uses FIXED DELAY (API_DELAY_GET) to prevent rate limits.
-	3. Deduplicates by ID.
-	4. Filters out deleted items.
+	Fetch ALL voicemails using POST /api/v2/voicemail/search.
+	Uses ownerId + owner fields to query for specific user.
 	"""
-	all_raw_entities = []
+	all_entities = []
 	
-	# Start with Page 1
-	base_url = f"https://api.{region_host}/api/v2/voicemail/me/messages"
-	current_url = f"{base_url}?pageSize={API_PAGE_SIZE}&pageNumber=1&sortBy=id&sortOrder=asc"
+	# If no user_id provided, get current user's ID
+	if not user_id:
+		user_info = get_user_info(access_token, region_host)
+		if not user_info:
+			return None, "Could not get user info"
+		user_id = user_info.get('id')
 	
-	app.logger.info("Fetching user's voicemails (traversing nextUri)...")
-	page_num = 1
+	url = f"https://api.{region_host}/api/v2/voicemail/search"
+	page_number = 1
+	page_size = API_PAGE_SIZE  # 100
 	
-	while current_url:
-		data, error = make_api_request(current_url, access_token)
+	search_body = {
+		"pageSize": page_size,
+		"pageNumber": page_number,
+		"query": [
+			{
+				"fields": ["owner"],
+				"type": "EXACT",
+				"value": "user"
+			},
+			{
+				"fields": ["ownerId"],
+				"type": "EXACT",
+				"value": user_id
+			}
+		]
+	}
+	
+	app.logger.info(f"Fetching voicemails for user {user_id} via POST search...")
+	
+	total_expected = None
+	
+	while True:
+		search_body["pageNumber"] = page_number
+		
+		data, error = make_api_request(url, access_token, method='POST', data=search_body)
 		
 		if error:
-			app.logger.error(f"Error fetching page {page_num}: {error}")
-			if page_num == 1:
+			app.logger.error(f"Error fetching page {page_number}: {error}")
+			if page_number == 1:
 				return None, error
-			break # Return what we have so far
+			break
 		
-		entities = data.get('entities', [])
-		all_raw_entities.extend(entities)
+		results = data.get('results', [])
+		all_entities.extend(results)
 		
-		# Check for next page
-		next_uri = data.get('nextUri')
-		if next_uri and entities:
-			# nextUri is relative, append to host
-			current_url = f"https://api.{region_host}{next_uri}"
-			page_num += 1
+		# Get total from first response
+		if total_expected is None:
+			total_expected = data.get('total', 0)
+			app.logger.info(f"API reports {total_expected} total voicemails")
+		
+		# Check if more pages
+		page_count = data.get('pageCount', 0)
+		
+		if page_number >= page_count or not results:
+			break
 			
-			# PROACTIVE RATE LIMITING
-			time.sleep(API_DELAY_GET)
-		else:
-			current_url = None
-			
-	# DEDUPLICATION & FILTERING
-	unique_map = {v['id']: v for v in all_raw_entities}
+		page_number += 1
+		time.sleep(API_DELAY_GET)
+	
+	# Deduplicate by ID
+	unique_map = {v['id']: v for v in all_entities}
 	unique_entities = list(unique_map.values())
 	
 	# Filter active only
@@ -267,12 +293,11 @@ def get_all_voicemails(access_token, region_host):
 	# Sort by date descending
 	active_voicemails.sort(key=lambda vm: vm.get('createdDate', ''), reverse=True)
 	
-	stats = (
-		f"✓ Fetch Complete: {len(all_raw_entities)} raw, "
+	app.logger.info(
+		f"✓ Fetch Complete: {len(all_entities)} raw, "
 		f"{len(unique_entities)} unique, "
 		f"{len(active_voicemails)} active."
 	)
-	app.logger.info(stats)
 	
 	return active_voicemails, None
 
