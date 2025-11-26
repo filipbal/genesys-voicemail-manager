@@ -228,7 +228,7 @@ def get_all_voicemails(access_token, region_host):
 	
 	# Start with Page 1
 	base_url = f"https://api.{region_host}/api/v2/voicemail/me/messages"
-	current_url = f"{base_url}?pageSize={API_PAGE_SIZE}&pageNumber=1"
+	current_url = f"{base_url}?pageSize={API_PAGE_SIZE}&pageNumber=1&sortBy=id&sortOrder=asc"
 	
 	app.logger.info("Fetching user's voicemails (traversing nextUri)...")
 	page_num = 1
