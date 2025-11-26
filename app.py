@@ -330,67 +330,99 @@ def search_groups(access_token, region_host, query):
 # ============================================================================
 
 def process_voicemails_in_batches(access_token, region_host, voicemail_ids, operation, 
-								   target_id=None, target_type='user', progress_id=None):
-	"""
-	Process batch operations using FIXED DELAYS for safety.
-	"""
-	results = {'success': 0, 'failed': 0, 'errors': [], 'total': len(voicemail_ids), 'processed': 0}
-	
-	total_ids = len(voicemail_ids)
-	
-	if progress_id:
-		progress_data[progress_id] = {'processed': 0, 'total': total_ids, 'success': 0, 'failed': 0, 'status': 'processing'}
-	
-	# Process
-	for i, vm_id in enumerate(voicemail_ids):
-		# Super Batch Delay every N items to be extra safe
-		if i > 0 and i % (BATCH_SIZE * SUPER_BATCH_SIZE) == 0:
-			time.sleep(SUPER_BATCH_DELAY)
-		
-		success = False
-		msg = ""
-		
-		try:
-			if operation == 'forward':
-				url = f"https://api.{region_host}/api/v2/voicemail/messages"
-				body = {"voicemailMessageId": vm_id}
-				if target_type == 'group': body["groupId"] = target_id
-				else: body["userId"] = target_id
-				_, err = make_api_request(url, access_token, 'POST', body)
-				success = (err is None)
-				msg = err
-			
-			elif operation == 'delete':
-				url = f"https://api.{region_host}/api/v2/voicemail/messages/{vm_id}"
-				_, err = make_api_request(url, access_token, 'DELETE')
-				success = (err is None)
-				msg = err
-			
-			if success: results['success'] += 1
-			else:
-				results['failed'] += 1
-				results['errors'].append(f"VM {vm_id[:8]}: {msg}")
-				
-		except Exception as e:
-			results['failed'] += 1
-			results['errors'].append(str(e))
-			
-		results['processed'] += 1
-		
-		if progress_id:
-			progress_data[progress_id].update({
-				'processed': results['processed'],
-				'success': results['success'],
-				'failed': results['failed']
-			})
-			
-		# PROACTIVE RATE LIMITING DELAY
-		time.sleep(API_DELAY_WRITE)
-	
-	if progress_id:
-		progress_data[progress_id]['status'] = 'complete'
-		
-	return results
+                                   target_id=None, target_type='user', progress_id=None):
+    """
+    Process batch operations using FIXED DELAYS for safety.
+    """
+    # Log incoming request
+    app.logger.info(f"=== BATCH {operation.upper()} START ===")
+    app.logger.info(f"Input IDs: {len(voicemail_ids)}, Unique: {len(set(voicemail_ids))}")
+    
+    # Deduplicate input as safety measure
+    original_count = len(voicemail_ids)
+    voicemail_ids = list(dict.fromkeys(voicemail_ids))
+    if len(voicemail_ids) != original_count:
+        app.logger.warning(f"Removed {original_count - len(voicemail_ids)} duplicate IDs from input")
+    
+    results = {'success': 0, 'failed': 0, 'errors': [], 'total': len(voicemail_ids), 'processed': 0}
+    
+    total_ids = len(voicemail_ids)
+    
+    if progress_id:
+        progress_data[progress_id] = {'processed': 0, 'total': total_ids, 'success': 0, 'failed': 0, 'status': 'processing'}
+    
+    # Process
+    for i, vm_id in enumerate(voicemail_ids):
+        # Super Batch Delay every N items to be extra safe
+        if i > 0 and i % (BATCH_SIZE * SUPER_BATCH_SIZE) == 0:
+            app.logger.info(f"Super batch break at item {i}, sleeping {SUPER_BATCH_DELAY}s...")
+            time.sleep(SUPER_BATCH_DELAY)
+        
+        success = False
+        msg = ""
+        
+        try:
+            if operation == 'forward':
+                url = f"https://api.{region_host}/api/v2/voicemail/messages"
+                body = {"voicemailMessageId": vm_id}
+                if target_type == 'group':
+                    body["groupId"] = target_id
+                else:
+                    body["userId"] = target_id
+                
+                response_data, err = make_api_request(url, access_token, 'POST', body)
+                success = (err is None)
+                msg = err
+                
+                # Log the response for debugging
+                if success and response_data:
+                    new_id = response_data.get('id', 'unknown')
+                    app.logger.debug(f"Forward OK: {vm_id[:8]} -> new ID: {new_id[:8] if new_id != 'unknown' else 'unknown'}")
+                elif not success:
+                    app.logger.error(f"Forward FAIL: {vm_id[:8]} - {msg}")
+            
+            elif operation == 'delete':
+                url = f"https://api.{region_host}/api/v2/voicemail/messages/{vm_id}"
+                _, err = make_api_request(url, access_token, 'DELETE')
+                success = (err is None)
+                msg = err
+                
+                if not success:
+                    app.logger.error(f"Delete FAIL: {vm_id[:8]} - {msg}")
+            
+            if success:
+                results['success'] += 1
+            else:
+                results['failed'] += 1
+                results['errors'].append(f"VM {vm_id[:8]}: {msg}")
+                
+        except Exception as e:
+            results['failed'] += 1
+            results['errors'].append(f"VM {vm_id[:8]}: {str(e)}")
+            app.logger.exception(f"Exception processing {vm_id[:8]}: {e}")
+            
+        results['processed'] += 1
+        
+        if progress_id:
+            progress_data[progress_id].update({
+                'processed': results['processed'],
+                'success': results['success'],
+                'failed': results['failed']
+            })
+        
+        # Log progress every 50 items
+        if (i + 1) % 50 == 0:
+            app.logger.info(f"Progress: {i+1}/{total_ids} - Success: {results['success']}, Failed: {results['failed']}")
+            
+        # PROACTIVE RATE LIMITING DELAY
+        time.sleep(API_DELAY_WRITE)
+    
+    if progress_id:
+        progress_data[progress_id]['status'] = 'complete'
+    
+    app.logger.info(f"=== BATCH {operation.upper()} END === Total: {total_ids}, Success: {results['success']}, Failed: {results['failed']}")
+    
+    return results
 
 # ============================================================================
 # HELPERS
