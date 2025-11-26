@@ -1,18 +1,13 @@
 #!/usr/bin/env python3
 """
-Genesys Cloud Voicemail Web Exporter - IMPROVED VERSION v9
-==========================================================
-CHANGES FROM v8:
-- Fixed endpoint: using /api/v2/voicemail/me/messages for user's inbox
-- Added per-user operation locks to prevent concurrent forward/delete operations
-- Returns 409 Conflict when operation already in progress
-- Proper concurrency control for multi-tab scenarios
-
-Rate Limiting Strategy:
-- OPERATION_DELAY = 0.4s (2.5 calls/sec = 150/min, 50% of 300/min limit)
-- BATCH_DELAY = 2.0s between batches
-- SUPER_BATCH_DELAY = 8.0s every 5 batches
-- No retries - if API call fails, log error and continue
+Genesys Cloud Voicemail Web Exporter - v10
+==========================================
+CHANGES FROM v9:
+- Fixed pagination: use pageCount from API response, no hardcoded limit
+- Dashboard shows only newest 20 records (preview mode)
+- Download/Forward/Delete pages show ALL non-deleted records (concatenated)
+- Batch sizes: 20 for forward/delete, 10 for download
+- Accurate count from filtered pagination results
 """
 
 import os
@@ -30,11 +25,11 @@ import threading
 import uuid
 from datetime import datetime
 from functools import wraps
-from collections import deque, defaultdict
+from collections import defaultdict
 
 from flask import (
     Flask, render_template, request, redirect, url_for,
-    session, flash, send_file, jsonify, Response, stream_with_context
+    session, flash, send_file, jsonify, Response
 )
 
 # ============================================================================
@@ -72,31 +67,30 @@ os.makedirs(TEMP_DIR, exist_ok=True)
 # FEATURE FLAGS
 ENABLE_DOWNLOADS = True  # Set to False to disable all download functionality
 
-API_PAGE_SIZE = 50  # Max items per API page (Genesys limit for /me/messages)
-DISPLAY_PAGE_SIZE = 50  # Items per UI page
+# API pagination
+API_PAGE_SIZE = 20  # Records per API call
 
-BATCH_SIZE = 25
-OPERATION_DELAY = 0.25      # 4 calls/sec = 240/min (80% of 300/min limit)
-BATCH_DELAY = 1.0           # Reduced from 2.0
-SUPER_BATCH_SIZE = 5
-SUPER_BATCH_DELAY = 5.0     # Reduced from 8.0
+# Batch operation sizes
+BATCH_SIZE = 20           # Forward/delete batch size
+DOWNLOAD_BATCH_SIZE = 10  # Download batch size
 
-# Download-specific settings
-DOWNLOAD_BATCH_SIZE = 10  # Smaller batches for downloads (media files are larger)
-DOWNLOAD_OPERATION_DELAY = 0.5  # Longer delay for downloads
+# Rate limiting delays
+OPERATION_DELAY = 0.25    # Delay between individual operations
+BATCH_DELAY = 1.0         # Delay between batches
+SUPER_BATCH_SIZE = 5      # Batches before super break
+SUPER_BATCH_DELAY = 5.0   # Super break duration
 
-# Load-balanced batch download settings
-BATCH_DOWNLOAD_SIZE = 50  # Number of voicemails per download batch/ZIP
-BATCH_EXPIRY_SECONDS = 3600  # 1 hour expiry for download links
+# Download-specific
+DOWNLOAD_OPERATION_DELAY = 0.5
 
-# Safety limit: 50 pages * 100 items = 5000 voicemails max
-MAX_PAGES = 50
+# Batch download settings
+BATCH_DOWNLOAD_SIZE = 20
+BATCH_EXPIRY_SECONDS = 3600
 
 # Progress tracking for SSE
 progress_data = {}
 
 # Storage for prepared batch downloads
-# Format: {batch_id: {'zip_path': str, 'created': timestamp, 'status': str, 'filename': str}}
 prepared_batches = {}
 batch_lock = threading.Lock()
 
@@ -197,7 +191,6 @@ def make_api_request(url, access_token, method='GET', data=None):
         except:
             error_msg = f"HTTP {e.code}: {e.reason}"
         
-        # Log rate limiting for monitoring
         if e.code == 429:
             app.logger.warning(f"Rate limit hit (429) - URL: {url}")
         
@@ -222,43 +215,28 @@ def get_user_info(access_token, region_host):
     return data
 
 
-def get_voicemail_stats(access_token, region_host):
-    """
-    Get accurate voicemail statistics from mailbox endpoint.
-    This excludes soft-deleted voicemails and is the source of truth for counts.
-    
-    Returns: dict with 'total', 'unread', 'deleted' counts, or None on error
-    """
-    url = f"https://api.{region_host}/api/v2/voicemail/mailbox"
-    data, error = make_api_request(url, access_token)
-    
-    if error:
-        app.logger.error(f"Error getting voicemail stats: {error}")
-        return None
-    
-    return {
-        'total': data.get('totalCount', 0),
-        'unread': data.get('unreadCount', 0),
-        'deleted': data.get('deletedCount', 0)  # Soft-deleted (14-day retention)
-    }
-
-
 def get_all_voicemails(access_token, region_host):
     """
     Get ALL non-deleted voicemails from user's inbox using pagination.
-    Uses /api/v2/voicemail/me/messages with proper pagination support.
-    Filters out soft-deleted messages.
+    
+    Logic:
+    1. First API call gets pageCount from response
+    2. Loop through all pages (1 to pageCount)
+    3. Collect all entities, filter out deleted: true
+    4. Return concatenated list sorted by date (newest first)
+    
+    Returns: (list of non-deleted voicemails, error string or None)
     """
     all_voicemails = []
     page_number = 1
-    page_size = 20  # Use 20 per page as requested
+    total_pages = None
     
     app.logger.info("Fetching user's voicemails from inbox...")
     
-    while page_number <= MAX_PAGES:
+    while True:
         url = f"https://api.{region_host}/api/v2/voicemail/me/messages"
         params = {
-            'pageSize': page_size,
+            'pageSize': API_PAGE_SIZE,
             'pageNumber': page_number
         }
         url_with_params = f"{url}?{urllib.parse.urlencode(params)}"
@@ -269,28 +247,35 @@ def get_all_voicemails(access_token, region_host):
             app.logger.error(f"Error fetching page {page_number}: {error}")
             if page_number == 1:
                 return None, error
+            # If we already have some data, return what we have
             break
         
         entities = data.get('entities', [])
-        total_from_api = data.get('total', 0)
-        page_count = data.get('pageCount', 0)
         
-        # Stop if no entities
+        # On first response, get the total page count
+        if total_pages is None:
+            total_pages = data.get('pageCount', 1)
+            total_from_api = data.get('total', 0)
+            app.logger.info(f"API reports {total_from_api} total records across {total_pages} pages")
+        
+        # Stop if no entities returned
         if not entities:
             app.logger.info(f"Empty page at {page_number}, stopping")
             break
         
         # Filter out deleted messages and add to collection
         non_deleted = [vm for vm in entities if not vm.get('deleted', False)]
+        deleted_count = len(entities) - len(non_deleted)
         all_voicemails.extend(non_deleted)
         
-        app.logger.info(
-            f"Page {page_number}/{page_count}: "
-            f"{len(non_deleted)} non-deleted out of {len(entities)} total"
+        app.logger.debug(
+            f"Page {page_number}/{total_pages}: "
+            f"{len(non_deleted)} kept, {deleted_count} deleted skipped"
         )
         
         # Stop if we've reached the last page
-        if page_number >= page_count:
+        if page_number >= total_pages:
+            app.logger.info(f"Reached last page {page_number}")
             break
         
         page_number += 1
@@ -300,7 +285,7 @@ def get_all_voicemails(access_token, region_host):
     all_voicemails.sort(key=lambda vm: vm.get('createdDate', ''), reverse=True)
     
     actual_count = len(all_voicemails)
-    app.logger.info(f"✓ Total: {actual_count} non-deleted voicemails")
+    app.logger.info(f"✓ Total: {actual_count} non-deleted voicemails collected")
     
     return all_voicemails, None
 
@@ -319,7 +304,6 @@ def download_voicemail_media(access_token, region_host, message_id):
             content_type = response.headers.get('Content-Type', '')
             
             if 'application/json' in content_type:
-                # Response contains media URI
                 data = json.loads(response.read().decode())
                 if 'mediaFileUri' in data:
                     media_req = urllib.request.Request(data['mediaFileUri'])
@@ -327,7 +311,6 @@ def download_voicemail_media(access_token, region_host, message_id):
                         return media_response.read(), None
                 return None, "No media URI in response"
             else:
-                # Direct media download
                 return response.read(), None
                 
     except urllib.request.HTTPError as e:
@@ -425,15 +408,6 @@ def process_voicemails_in_batches(access_token, region_host, voicemail_ids, oper
                                    target_id=None, target_type='user', progress_id=None):
     """
     Process voicemails in batches with fail-fast approach (no retries).
-    
-    Args:
-        operation: 'forward' or 'delete'
-        target_id: Required for forward operation
-        target_type: 'user' or 'group' for forward operation
-        progress_id: Optional ID for progress tracking via SSE
-        
-    Returns:
-        dict with success/failed counts and detailed error list
     """
     results = {
         'success': 0,
@@ -449,7 +423,6 @@ def process_voicemails_in_batches(access_token, region_host, voicemail_ids, oper
     
     app.logger.info(f"Starting {operation}: {total_ids} items in {total_batches} batches")
     
-    # Initialize progress if tracking
     if progress_id:
         progress_data[progress_id] = {
             'processed': 0,
@@ -464,13 +437,11 @@ def process_voicemails_in_batches(access_token, region_host, voicemail_ids, oper
         batch = voicemail_ids[batch_start:batch_end]
         batch_num = (batch_start // BATCH_SIZE) + 1
         
-        # Super batch break every SUPER_BATCH_SIZE batches
         if batches_since_super_break >= SUPER_BATCH_SIZE and batch_num > 1:
             app.logger.info(f"Super batch break: {SUPER_BATCH_DELAY}s...")
             time.sleep(SUPER_BATCH_DELAY)
             batches_since_super_break = 0
         
-        # Process each item in the batch
         for idx, vm_id in enumerate(batch):
             try:
                 if operation == 'forward':
@@ -486,12 +457,10 @@ def process_voicemails_in_batches(access_token, region_host, voicemail_ids, oper
                     results['success'] += 1
                 else:
                     results['failed'] += 1
-                    # Include voicemail ID prefix in error for debugging
                     results['errors'].append(f"VM {vm_id[:8]}: {result}")
                 
                 results['processed'] += 1
                 
-                # Update progress
                 if progress_id:
                     progress_data[progress_id].update({
                         'processed': results['processed'],
@@ -499,7 +468,6 @@ def process_voicemails_in_batches(access_token, region_host, voicemail_ids, oper
                         'failed': results['failed']
                     })
                 
-                # Delay between operations within a batch
                 if idx < len(batch) - 1:
                     time.sleep(OPERATION_DELAY)
                     
@@ -516,12 +484,10 @@ def process_voicemails_in_batches(access_token, region_host, voicemail_ids, oper
         
         batches_since_super_break += 1
         
-        # Delay between batches
         if batch_end < total_ids:
             app.logger.debug(f"Batch {batch_num}/{total_batches} complete, waiting {BATCH_DELAY}s...")
             time.sleep(BATCH_DELAY)
     
-    # Mark progress as complete
     if progress_id:
         progress_data[progress_id]['status'] = 'complete'
     
@@ -567,7 +533,6 @@ def format_filename(voicemail):
     else:
         date_str = 'unknown'
     
-    # Sanitize caller name
     safe_caller = ''.join(
         c if c.isalnum() or c in ' -_' else '_' 
         for c in str(caller_name)
@@ -605,7 +570,6 @@ def cleanup_old_exports():
     """Clean up export files older than 1 hour and expired batch downloads"""
     try:
         now = time.time()
-        # Clean up temp directory
         for item in os.listdir(TEMP_DIR):
             item_path = os.path.join(TEMP_DIR, item)
             if os.path.isfile(item_path) and now - os.path.getmtime(item_path) > 3600:
@@ -613,13 +577,11 @@ def cleanup_old_exports():
             elif os.path.isdir(item_path) and now - os.path.getmtime(item_path) > 3600:
                 shutil.rmtree(item_path, ignore_errors=True)
 
-        # Clean up expired batch downloads
         with batch_lock:
             expired_ids = []
             for batch_id, batch_info in prepared_batches.items():
                 if now - batch_info.get('created', 0) > BATCH_EXPIRY_SECONDS:
                     expired_ids.append(batch_id)
-                    # Remove ZIP file if exists
                     zip_path = batch_info.get('zip_path')
                     if zip_path and os.path.exists(zip_path):
                         try:
@@ -638,10 +600,7 @@ def cleanup_old_exports():
 
 
 def process_single_batch(batch_id, voicemails, access_token, region_host, user_name, batch_num, total_batches):
-    """
-    Process a single batch - download voicemails and create ZIP.
-    Called by the batch worker thread.
-    """
+    """Process a single batch - download voicemails and create ZIP."""
     try:
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         export_name = f"voicemails_batch{batch_num}of{total_batches}_{user_name}_{timestamp}"
@@ -654,7 +613,6 @@ def process_single_batch(batch_id, voicemails, access_token, region_host, user_n
 
         app.logger.info(f"Batch {batch_num}/{total_batches}: Starting download of {total_items} voicemails")
 
-        # Download voicemails with rate limiting
         for batch_start in range(0, total_items, DOWNLOAD_BATCH_SIZE):
             batch_end = min(batch_start + DOWNLOAD_BATCH_SIZE, total_items)
             batch = voicemails[batch_start:batch_end]
@@ -673,15 +631,12 @@ def process_single_batch(batch_id, voicemails, access_token, region_host, user_n
                         f.write(media_bytes)
                     downloaded += 1
 
-                # Delay between downloads
                 if idx < len(batch) - 1:
                     time.sleep(DOWNLOAD_OPERATION_DELAY)
 
-            # Delay between internal batches
             if batch_end < total_items:
                 time.sleep(BATCH_DELAY)
 
-        # Save metadata
         metadata_file = os.path.join(export_dir, 'metadata.json')
         with open(metadata_file, 'w', encoding='utf-8') as f:
             json.dump({
@@ -694,7 +649,6 @@ def process_single_batch(batch_id, voicemails, access_token, region_host, user_n
                 'errors': errors
             }, f, indent=2, default=str)
 
-        # Create ZIP
         zip_path = os.path.join(TEMP_DIR, f"{export_name}.zip")
         with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
             for root, dirs, files in os.walk(export_dir):
@@ -703,10 +657,8 @@ def process_single_batch(batch_id, voicemails, access_token, region_host, user_n
                     arcname = os.path.relpath(file_path, export_dir)
                     zipf.write(file_path, arcname)
 
-        # Clean up temp directory
         shutil.rmtree(export_dir, ignore_errors=True)
 
-        # Update batch status
         with batch_lock:
             if batch_id in prepared_batches:
                 prepared_batches[batch_id].update({
@@ -730,44 +682,34 @@ def process_single_batch(batch_id, voicemails, access_token, region_host, user_n
 
 
 def batch_worker():
-    """
-    Worker thread that processes batches sequentially from the queue.
-    Processes one batch at a time in order.
-    """
+    """Worker thread that processes batches sequentially from the queue."""
     global batch_worker_running
 
     app.logger.info("Batch worker started")
 
     while True:
         try:
-            # Get next batch from queue (blocks until available)
             job = batch_queue.get(timeout=5)
 
             if job is None:
-                # Poison pill - stop worker
                 break
 
             batch_id, voicemails, access_token, region_host, user_name, batch_num, total_batches = job
 
-            # Update status to 'preparing'
             with batch_lock:
                 if batch_id in prepared_batches:
                     prepared_batches[batch_id]['status'] = 'preparing'
 
-            # Process this batch
             process_single_batch(batch_id, voicemails, access_token, region_host, user_name, batch_num, total_batches)
 
-            # Mark task as done
             batch_queue.task_done()
 
-            # Small delay between batches to be safe
             time.sleep(1)
 
         except Exception as e:
-            if str(e) != '':  # Ignore timeout exceptions
+            if str(e) != '':
                 app.logger.error(f"Batch worker error: {e}")
 
-            # Check if queue is empty and no more work expected
             if batch_queue.empty():
                 break
 
@@ -796,7 +738,6 @@ def index():
     """Home page with login form"""
     cleanup_old_exports()
     
-    # If already logged in, redirect to dashboard
     if 'access_token' in session and 'user_info' in session:
         return redirect(url_for('dashboard'))
     
@@ -819,18 +760,15 @@ def login():
     
     region = REGIONS[region_key]
     
-    # Generate PKCE codes
     code_verifier = generate_code_verifier()
     code_challenge = generate_code_challenge(code_verifier)
     state = generate_state()
     
-    # Store in session
     session['code_verifier'] = code_verifier
     session['oauth_state'] = state
     session['region_key'] = region_key
     session['region_host'] = region['host']
     
-    # Build authorization URL
     auth_params = {
         'client_id': CLIENT_ID,
         'response_type': 'code',
@@ -848,25 +786,21 @@ def login():
 @app.route('/callback')
 def callback():
     """OAuth callback handler"""
-    # Check for errors
     error = request.args.get('error')
     if error:
         flash(f'Login failed: {request.args.get("error_description", error)}', 'danger')
         return redirect(url_for('index'))
     
-    # Verify state
     state = request.args.get('state')
     if state != session.get('oauth_state'):
         flash('Invalid state parameter. Please try again.', 'danger')
         return redirect(url_for('index'))
     
-    # Get authorization code
     auth_code = request.args.get('code')
     if not auth_code:
         flash('No authorization code received.', 'danger')
         return redirect(url_for('index'))
     
-    # Get code verifier and region from session
     code_verifier = session.get('code_verifier')
     region_host = session.get('region_host')
     
@@ -874,23 +808,19 @@ def callback():
         flash('Session expired. Please try again.', 'danger')
         return redirect(url_for('index'))
     
-    # Exchange code for token
     access_token, error = exchange_code_for_token(auth_code, region_host, code_verifier)
     
     if error:
         flash(f'Token exchange failed: {error}', 'danger')
         return redirect(url_for('index'))
     
-    # Store access token
     session['access_token'] = access_token
     
-    # Get user info
     user_info = get_user_info(access_token, region_host)
     if user_info:
         session['user_info'] = user_info
         flash(f'Welcome, {user_info.get("name", "User")}!', 'success')
     
-    # Clean up temporary session data
     session.pop('code_verifier', None)
     session.pop('oauth_state', None)
     
@@ -900,16 +830,13 @@ def callback():
 @app.route('/dashboard')
 @login_required
 def dashboard():
+    """Dashboard - shows newest 20 voicemails as preview"""
     access_token = session.get('access_token')
     region_host = session.get('region_host')
     region_key = session.get('region_key')
     user_info = session.get('user_info', {})
     
-    page = request.args.get('page', 1, type=int)
-    if page < 1:
-        page = 1
-    
-    # Get all voicemails using corrected endpoint
+    # Get all voicemails (concatenated from all pages, filtered)
     all_voicemails, error = get_all_voicemails(access_token, region_host)
     
     if error:
@@ -919,17 +846,14 @@ def dashboard():
     if not all_voicemails:
         all_voicemails = []
     
+    # Total count from filtered results
     total_count = len(all_voicemails)
-    total_pages = (total_count + DISPLAY_PAGE_SIZE - 1) // DISPLAY_PAGE_SIZE if total_count > 0 else 1
     
-    # Get page of voicemails
-    start_idx = (page - 1) * DISPLAY_PAGE_SIZE
-    end_idx = start_idx + DISPLAY_PAGE_SIZE
-    page_voicemails = all_voicemails[start_idx:end_idx]
+    # Show only newest 20 for preview
+    preview_voicemails = all_voicemails[:20]
+    processed_voicemails = [format_voicemail(vm) for vm in preview_voicemails]
     
-    processed_voicemails = [format_voicemail(vm) for vm in page_voicemails]
-    
-    # Calculate total duration
+    # Calculate total duration from ALL voicemails
     total_duration_seconds = sum(vm.get('audioRecordingDurationSeconds', 0) or 0 for vm in all_voicemails)
     total_duration_minutes = round(total_duration_seconds / 60, 1) if total_duration_seconds else 0
     
@@ -938,21 +862,15 @@ def dashboard():
                          region=REGIONS.get(region_key, {}),
                          voicemails=processed_voicemails,
                          voicemail_count=total_count,
+                         preview_count=len(processed_voicemails),
                          total_duration_minutes=total_duration_minutes,
-                         current_page=page,
-                         total_pages=total_pages,
-                         has_prev=page > 1,
-                         has_next=page < total_pages,
-                         page_size=DISPLAY_PAGE_SIZE,
-                         start_idx=start_idx + 1,
-                         end_idx=start_idx + len(processed_voicemails),
                          enable_downloads=ENABLE_DOWNLOADS)
+
 
 @app.route('/download/<message_id>')
 @login_required
 def download_single(message_id):
     """Download a single voicemail as WAV file"""
-    # Check if downloads are enabled
     if not ENABLE_DOWNLOADS:
         flash('Download functionality is currently disabled.', 'warning')
         return redirect(url_for('dashboard'))
@@ -960,7 +878,6 @@ def download_single(message_id):
     access_token = session.get('access_token')
     region_host = session.get('region_host')
     
-    # Get voicemail info
     all_voicemails, _ = get_all_voicemails(access_token, region_host)
     voicemail = next((vm for vm in all_voicemails if vm.get('id') == message_id), None)
     
@@ -968,7 +885,6 @@ def download_single(message_id):
         flash('Voicemail not found.', 'danger')
         return redirect(url_for('dashboard'))
     
-    # Download media
     media_bytes, error = download_voicemail_media(access_token, region_host, message_id)
     
     if error:
@@ -987,8 +903,7 @@ def download_single(message_id):
 @app.route('/download')
 @login_required
 def download_page():
-    """Download page - bulk download with selection UI"""
-    # Check if downloads are enabled
+    """Download page - shows ALL voicemails for bulk selection"""
     if not ENABLE_DOWNLOADS:
         flash('Download functionality is currently disabled.', 'warning')
         return redirect(url_for('dashboard'))
@@ -998,13 +913,14 @@ def download_page():
     region_key = session.get('region_key')
     user_info = session.get('user_info', {})
     
-    # Get all voicemails - pagination is source of truth
+    # Get ALL voicemails (concatenated)
     all_voicemails, error = get_all_voicemails(access_token, region_host)
     
     if error:
         flash(f'Error fetching voicemails: {error}', 'warning')
         all_voicemails = []
     
+    # Format ALL for display
     processed_voicemails = [format_voicemail(vm) for vm in all_voicemails]
     total_count = len(processed_voicemails)
     
@@ -1020,17 +936,13 @@ def download_page():
 @app.route('/download-prepare', methods=['POST'])
 @login_required
 def download_prepare():
-    """
-    Prepare batch downloads - splits voicemails into batches of 50,
-    starts background preparation, and returns manifest page with download links.
-    """
+    """Prepare batch downloads"""
     if not ENABLE_DOWNLOADS:
         flash('Download functionality is currently disabled.', 'warning')
         return redirect(url_for('download_page'))
 
     access_token = session.get('access_token')
     region_host = session.get('region_host')
-    region_key = session.get('region_key')
     user_info = session.get('user_info', {})
 
     data = request.get_json()
@@ -1044,7 +956,6 @@ def download_prepare():
         flash('No voicemails selected', 'warning')
         return redirect(url_for('download_page'))
 
-    # Get all voicemails to get metadata
     all_voicemails, error = get_all_voicemails(access_token, region_host)
 
     if error or not all_voicemails:
@@ -1062,10 +973,8 @@ def download_prepare():
             'error': 'No matching voicemails found for the selected IDs'
         }), 400
 
-    # Sort by date to maintain order
     selected_vms.sort(key=lambda vm: vm.get('createdDate', '') or '', reverse=True)
 
-    # Split into batches of BATCH_DOWNLOAD_SIZE (50)
     total_vms = len(selected_vms)
     num_batches = (total_vms + BATCH_DOWNLOAD_SIZE - 1) // BATCH_DOWNLOAD_SIZE
 
@@ -1073,9 +982,8 @@ def download_prepare():
     manifest_id = str(uuid.uuid4())
     batch_ids = []
 
-    app.logger.info(f"Preparing {num_batches} batches for {total_vms} voicemails (sequential processing)")
+    app.logger.info(f"Preparing {num_batches} batches for {total_vms} voicemails")
 
-    # Create all batch entries and queue them for processing
     for i in range(num_batches):
         start_idx = i * BATCH_DOWNLOAD_SIZE
         end_idx = min(start_idx + BATCH_DOWNLOAD_SIZE, total_vms)
@@ -1085,7 +993,6 @@ def download_prepare():
         batch_id = str(uuid.uuid4())
         batch_ids.append(batch_id)
 
-        # Initialize batch entry
         with batch_lock:
             prepared_batches[batch_id] = {
                 'status': 'queued',
@@ -1097,15 +1004,10 @@ def download_prepare():
                 'filename': f"voicemails_batch{batch_num}of{num_batches}_{user_name}.zip"
             }
 
-        # Add to queue for sequential processing
         batch_queue.put((batch_id, batch_vms, access_token, region_host, user_name, batch_num, num_batches))
 
-    # Start the batch worker if not running
     start_batch_worker()
 
-    app.logger.info(f"Queued {num_batches} batches for {total_vms} voicemails")
-
-    # Return manifest data as JSON
     batches_info = []
     with batch_lock:
         for batch_id in batch_ids:
@@ -1144,7 +1046,6 @@ def download_manifest():
     user_info = session.get('user_info', {})
     region_key = session.get('region_key')
 
-    # Get all batches for this manifest
     batches_info = []
     with batch_lock:
         for batch_id, batch in prepared_batches.items():
@@ -1160,7 +1061,6 @@ def download_manifest():
                     'errors': batch.get('errors', 0)
                 })
 
-    # Sort by batch number
     batches_info.sort(key=lambda x: x['batch_num'])
 
     if not batches_info:
@@ -1250,13 +1150,13 @@ def api_batch_status():
 @app.route('/forward')
 @login_required
 def forward_page():
-    """Forward voicemails page"""
+    """Forward page - shows ALL voicemails for selection"""
     access_token = session.get('access_token')
     region_host = session.get('region_host')
     region_key = session.get('region_key')
     user_info = session.get('user_info', {})
     
-    # Get all voicemails - pagination is source of truth
+    # Get ALL voicemails (concatenated)
     all_voicemails, error = get_all_voicemails(access_token, region_host)
     
     if error:
@@ -1277,13 +1177,13 @@ def forward_page():
 @app.route('/delete')
 @login_required
 def delete_page():
-    """Delete voicemails page"""
+    """Delete page - shows ALL voicemails for selection"""
     access_token = session.get('access_token')
     region_host = session.get('region_host')
     region_key = session.get('region_key')
     user_info = session.get('user_info', {})
     
-    # Get all voicemails - pagination is source of truth
+    # Get ALL voicemails (concatenated)
     all_voicemails, error = get_all_voicemails(access_token, region_host)
     
     if error:
@@ -1364,7 +1264,7 @@ def api_search_groups():
 @app.route('/api/forward', methods=['POST'])
 @login_required
 def api_forward_voicemails():
-    """Forward voicemails in batches - fail-fast, no retries, with concurrency control"""
+    """Forward voicemails in batches"""
     access_token = session.get('access_token')
     region_host = session.get('region_host')
     user_id = session.get('user_info', {}).get('id')
@@ -1383,17 +1283,15 @@ def api_forward_voicemails():
     if not voicemail_ids or not target_id:
         return jsonify({'success': False, 'error': 'Missing required data'}), 400
     
-    # CONCURRENCY FIX: Per-user lock to prevent duplicate forwards
     user_lock = user_operation_locks[user_id]
     
     if not user_lock.acquire(blocking=False):
         return jsonify({
             'success': False,
             'error': 'Another forward operation is already in progress. Please wait for it to complete.'
-        }), 409  # 409 Conflict
+        }), 409
     
     try:
-        # Process in batches with fail-fast approach
         results = process_voicemails_in_batches(
             access_token, region_host, voicemail_ids, 'forward',
             target_id=target_id, target_type=target_type
@@ -1404,7 +1302,7 @@ def api_forward_voicemails():
             'forwarded': results['success'],
             'failed': results['failed'],
             'total': results['total'],
-            'errors': results['errors'][:20]  # Show up to 20 errors
+            'errors': results['errors'][:20]
         })
     finally:
         user_lock.release()
@@ -1413,7 +1311,7 @@ def api_forward_voicemails():
 @app.route('/api/delete', methods=['POST'])
 @login_required
 def api_delete_voicemails():
-    """Delete voicemails in batches - fail-fast, no retries, with concurrency control"""
+    """Delete voicemails in batches"""
     access_token = session.get('access_token')
     region_host = session.get('region_host')
     user_id = session.get('user_info', {}).get('id')
@@ -1430,17 +1328,15 @@ def api_delete_voicemails():
     if not voicemail_ids:
         return jsonify({'success': False, 'error': 'No voicemails selected'}), 400
     
-    # CONCURRENCY FIX: Per-user lock to prevent duplicate deletes
     user_lock = user_operation_locks[user_id]
     
     if not user_lock.acquire(blocking=False):
         return jsonify({
             'success': False,
             'error': 'Another delete operation is already in progress. Please wait for it to complete.'
-        }), 409  # 409 Conflict
+        }), 409
     
     try:
-        # Process in batches with fail-fast approach
         results = process_voicemails_in_batches(
             access_token, region_host, voicemail_ids, 'delete'
         )
@@ -1450,7 +1346,7 @@ def api_delete_voicemails():
             'deleted': results['success'],
             'failed': results['failed'],
             'total': results['total'],
-            'errors': results['errors'][:20]  # Show up to 20 errors
+            'errors': results['errors'][:20]
         })
     finally:
         user_lock.release()
@@ -1459,29 +1355,15 @@ def api_delete_voicemails():
 @app.route('/api/voicemails')
 @login_required
 def api_voicemails():
-    """Get voicemails list (JSON API) - pagination is source of truth"""
+    """Get all voicemails list (JSON API)"""
     access_token = session.get('access_token')
     region_host = session.get('region_host')
     
-    page = request.args.get('page', 1, type=int)
-    page_size = request.args.get('page_size', DISPLAY_PAGE_SIZE, type=int)
-    page_size = min(max(page_size, 10), 100)  # Clamp between 10 and 100
-    
-    # Get all voicemails - pagination is source of truth
     all_voicemails, error = get_all_voicemails(access_token, region_host)
     
     if error:
         return jsonify({'error': error}), 500
     
-    total_count = len(all_voicemails)
-    total_pages = (total_count + page_size - 1) // page_size if total_count > 0 else 1
-    
-    # Get page of voicemails
-    start_idx = (page - 1) * page_size
-    end_idx = start_idx + page_size
-    page_voicemails = all_voicemails[start_idx:end_idx]
-    
-    # Minimal format for API
     processed = [{
         'id': vm.get('id'),
         'caller_name': vm.get('callerName', 'Unknown'),
@@ -1489,28 +1371,21 @@ def api_voicemails():
         'created_date': vm.get('createdDate'),
         'duration_seconds': vm.get('audioRecordingDurationSeconds', 0),
         'read': vm.get('read', False),
-    } for vm in page_voicemails]
+    } for vm in all_voicemails]
     
     return jsonify({
         'voicemails': processed,
-        'count': len(processed),
-        'total_count': total_count,  # From pagination
-        'page': page,
-        'page_size': page_size,
-        'total_pages': total_pages,
-        'has_next': page < total_pages,
-        'has_prev': page > 1
+        'total_count': len(processed)
     })
 
 
 @app.route('/api/voicemails/stats')
 @login_required
 def api_voicemail_stats():
-    """Get voicemail statistics from actual pagination data"""
+    """Get voicemail statistics"""
     access_token = session.get('access_token')
     region_host = session.get('region_host')
     
-    # Get all voicemails - pagination is source of truth
     all_voicemails, error = get_all_voicemails(access_token, region_host)
     
     if error:
@@ -1525,8 +1400,8 @@ def api_voicemail_stats():
     )
     
     return jsonify({
-        'total_count': total_count,  # From pagination
-        'unread_count': unread_count,  # From actual data
+        'total_count': total_count,
+        'unread_count': unread_count,
         'total_duration_seconds': total_duration,
         'total_duration_minutes': round(total_duration / 60, 1) if total_duration else 0
     })
@@ -1549,7 +1424,7 @@ def health():
     """Health check endpoint"""
     return jsonify({
         'status': 'healthy',
-        'version': 'v9-concurrency-fixed',
+        'version': 'v10-pagination-fix',
         'timestamp': datetime.now().isoformat()
     })
 

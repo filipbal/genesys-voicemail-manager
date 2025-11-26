@@ -55,7 +55,7 @@
     </div>
     <div class="card-body p-0">
         {% if voicemails %}
-        <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
+        <div class="table-responsive" style="max-height: 500px; overflow-y: auto;">
             <table class="table table-hover mb-0">
                 <thead class="table-light sticky-top">
                     <tr>
@@ -63,6 +63,7 @@
                             <input type="checkbox" class="form-check-input" id="selectAllCheckbox"
                                    onchange="toggleSelectAll(this)">
                         </th>
+                        <th scope="col">#</th>
                         <th scope="col">Caller</th>
                         <th scope="col">Phone Number</th>
                         <th scope="col">Date & Time</th>
@@ -78,6 +79,7 @@
                                    data-filename="{{ vm.filename }}"
                                    data-caller="{{ vm.caller_name }}">
                         </td>
+                        <td>{{ loop.index }}</td>
                         <td>
                             <i class="bi bi-person me-1 text-muted"></i>
                             {{ vm.caller_name }}
@@ -165,7 +167,7 @@
 
 <script>
 // Configuration
-const BATCH_SIZE = 50;           // Files per batch
+const BATCH_SIZE = {{ batch_size }};  // 10 files per batch for downloads
 const FILE_DELAY = 500;          // 0.5s between files
 const BATCH_DELAY = 3000;        // 3s between batches
 const SUPER_BATCH_SIZE = 5;      // Batches before super break

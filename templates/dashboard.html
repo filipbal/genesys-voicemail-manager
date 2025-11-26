@@ -112,14 +112,14 @@
     </div>
 </div>
 
-<!-- Voicemails Table -->
+<!-- Voicemails Table - Preview Mode -->
 <div class="card">
     <div class="card-header d-flex justify-content-between align-items-center">
         <h5 class="mb-0">
             <i class="bi bi-list-ul me-2"></i>
-            Your Voicemails
+            Recent Voicemails
             {% if voicemail_count > 0 %}
-            <small class="text-muted ms-2">(showing {{ start_idx }}-{{ end_idx }} of {{ voicemail_count }})</small>
+            <small class="text-muted ms-2">(showing newest {{ preview_count }} of {{ voicemail_count }} total)</small>
             {% endif %}
         </h5>
         <button class="btn btn-outline-secondary btn-sm" onclick="location.reload()">
@@ -144,7 +144,7 @@
                 <tbody>
                     {% for vm in voicemails %}
                     <tr class="voicemail-row {% if not vm.read %}voicemail-unread{% endif %}">
-                        <td>{{ start_idx + loop.index0 }}</td>
+                        <td>{{ loop.index }}</td>
                         <td>
                             <i class="bi bi-person me-1 text-muted"></i>
                             {{ vm.caller_name }}
@@ -199,63 +199,29 @@
             </table>
         </div>
         
-        <!-- Pagination -->
-        {% if total_pages > 1 %}
-        <div class="card-footer">
-            <nav aria-label="Voicemail pagination">
-                <ul class="pagination justify-content-center mb-0">
-                    <!-- Previous button -->
-                    <li class="page-item {% if not has_prev %}disabled{% endif %}">
-                        <a class="page-link" href="{{ url_for('dashboard', page=current_page-1) }}" 
-                           {% if not has_prev %}tabindex="-1" aria-disabled="true"{% endif %}>
-                            <i class="bi bi-chevron-left"></i> Previous
-                        </a>
-                    </li>
-                    
-                    <!-- Page numbers -->
-                    {% set start_page = [1, current_page - 2]|max %}
-                    {% set end_page = [total_pages, current_page + 2]|min %}
-                    
-                    {% if start_page > 1 %}
-                    <li class="page-item">
-                        <a class="page-link" href="{{ url_for('dashboard', page=1) }}">1</a>
-                    </li>
-                    {% if start_page > 2 %}
-                    <li class="page-item disabled">
-                        <span class="page-link">...</span>
-                    </li>
+        <!-- Info about viewing all voicemails -->
+        {% if voicemail_count > preview_count %}
+        <div class="card-footer bg-light">
+            <div class="text-center">
+                <p class="text-muted mb-2">
+                    <i class="bi bi-info-circle me-1"></i>
+                    This is a preview of your newest {{ preview_count }} voicemails.
+                    To see and manage all {{ voicemail_count }} voicemails, use the pages below:
+                </p>
+                <div class="btn-group">
+                    {% if enable_downloads %}
+                    <a href="{{ url_for('download_page') }}" class="btn btn-outline-success btn-sm">
+                        <i class="bi bi-download me-1"></i> Download Page
+                    </a>
                     {% endif %}
-                    {% endif %}
-                    
-                    {% for page_num in range(start_page, end_page + 1) %}
-                    <li class="page-item {% if page_num == current_page %}active{% endif %}">
-                        <a class="page-link" href="{{ url_for('dashboard', page=page_num) }}">{{ page_num }}</a>
-                    </li>
-                    {% endfor %}
-                    
-                    {% if end_page < total_pages %}
-                    {% if end_page < total_pages - 1 %}
-                    <li class="page-item disabled">
-                        <span class="page-link">...</span>
-                    </li>
-                    {% endif %}
-                    <li class="page-item">
-                        <a class="page-link" href="{{ url_for('dashboard', page=total_pages) }}">{{ total_pages }}</a>
-                    </li>
-                    {% endif %}
-                    
-                    <!-- Next button -->
-                    <li class="page-item {% if not has_next %}disabled{% endif %}">
-                        <a class="page-link" href="{{ url_for('dashboard', page=current_page+1) }}"
-                           {% if not has_next %}tabindex="-1" aria-disabled="true"{% endif %}>
-                            Next <i class="bi bi-chevron-right"></i>
-                        </a>
-                    </li>
-                </ul>
-            </nav>
-            <p class="text-center text-muted small mt-2 mb-0">
-                Page {{ current_page }} of {{ total_pages }} ({{ voicemail_count }} total voicemails)
-            </p>
+                    <a href="{{ url_for('forward_page') }}" class="btn btn-outline-warning btn-sm">
+                        <i class="bi bi-forward me-1"></i> Forward Page
+                    </a>
+                    <a href="{{ url_for('delete_page') }}" class="btn btn-outline-danger btn-sm">
+                        <i class="bi bi-trash me-1"></i> Delete Page
+                    </a>
+                </div>
+            </div>
         </div>
         {% endif %}
         

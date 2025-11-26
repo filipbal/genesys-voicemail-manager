@@ -112,7 +112,7 @@
     </div>
     <div class="card-body p-0">
         {% if voicemails %}
-        <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
+        <div class="table-responsive" style="max-height: 500px; overflow-y: auto;">
             <table class="table table-hover mb-0">
                 <thead class="table-light sticky-top">
                     <tr>
@@ -120,6 +120,7 @@
                             <input type="checkbox" class="form-check-input" id="selectAllCheckbox" 
                                    onchange="toggleSelectAll(this)">
                         </th>
+                        <th scope="col">#</th>
                         <th scope="col">Caller</th>
                         <th scope="col">Phone Number</th>
                         <th scope="col">Date & Time</th>
@@ -133,6 +134,7 @@
                             <input type="checkbox" class="form-check-input voicemail-checkbox" 
                                    value="{{ vm.id }}" data-caller="{{ vm.caller_name }}">
                         </td>
+                        <td>{{ loop.index }}</td>
                         <td>
                             <i class="bi bi-person me-1 text-muted"></i>
                             {{ vm.caller_name }}
@@ -444,18 +446,15 @@ function forwardVoicemails() {
     const progressModal = new bootstrap.Modal(document.getElementById('progressModal'));
     progressModal.show();
     
-    // Simulate progress - adjusted for gunicorn timeout fix
-    // With BATCH_SIZE=20, BATCH_DELAY=3s, SUPER_BATCH_DELAY=10s
-    // Estimate: ~20 items per batch, ~5s per batch average, super break every 5 batches
+    // Estimate time
     const batches = Math.ceil(voicemailIds.length / BATCH_SIZE);
     const superBatches = Math.floor(batches / 5);
     const estimatedSeconds = (batches * 5) + (superBatches * 10);
     
     let progress = 0;
     const progressInterval = setInterval(() => {
-        // Progress that accounts for actual operation time
         progress += (100 / Math.max(estimatedSeconds, 10)) * 0.5;
-        if (progress > 95) progress = 95; // Don't go past 95% until complete
+        if (progress > 95) progress = 95;
         document.getElementById('progressBar').style.width = progress + '%';
         document.getElementById('progressBar').textContent = Math.round(progress) + '%';
     }, 500);
@@ -479,21 +478,17 @@ function forwardVoicemails() {
     })
     .then(response => response.json())
     .then(data => {
-        // Stop progress simulation
         clearInterval(progressInterval);
         document.getElementById('progressBar').style.width = '100%';
         document.getElementById('progressBar').textContent = '100%';
         
-        // Hide progress modal after a short delay
         setTimeout(() => {
             progressModal.hide();
             
-            // Reset button
             btn.querySelector('.btn-text').style.display = 'inline-block';
             btn.querySelector('.loading-spinner').style.display = 'none';
             btn.disabled = false;
             
-            // Show results
             showResults(data);
         }, 500);
     })
@@ -558,7 +553,6 @@ function showResults(data) {
     
     resultsBody.innerHTML = html;
     
-    // Show modal
     const modal = new bootstrap.Modal(document.getElementById('resultsModal'));
     modal.show();
 }
