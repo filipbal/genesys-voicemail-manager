@@ -70,8 +70,8 @@ API_PAGE_SIZE = 50  # Max page size to reduce request count
 
 # PROACTIVE DELAYS (Seconds)
 # Limit is ~300 req/min (1 req every 0.2s). We use safer margins.
-API_DELAY_GET = 0.4     # ~150 req/min for reading pages
-API_DELAY_WRITE = 0.6   # ~100 req/min for write ops (delete/forward)
+API_DELAY_GET = 1.0     # ~60 req/min for reading pages
+API_DELAY_WRITE = 1.0   # ~60 req/min for write ops (delete/forward)
 
 # Batch settings
 BATCH_SIZE = 20           # UI batch size
