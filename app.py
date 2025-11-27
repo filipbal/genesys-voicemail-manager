@@ -64,7 +64,7 @@ os.makedirs(TEMP_DIR, exist_ok=True)
 # ============================================================================
 
 # FEATURE FLAGS
-ENABLE_DOWNLOADS = True
+ENABLE_DOWNLOADS = False
 
 # API Settings
 API_PAGE_SIZE = 100
