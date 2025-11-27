@@ -807,6 +807,9 @@ def download_single(message_id):
 @app.route('/download')
 @login_required
 def download_page():
+	if not ENABLE_DOWNLOADS:
+		flash('Download functionality is currently disabled.', 'warning')
+		return redirect(url_for('dashboard'))
 	voicemails, _ = get_all_voicemails(session.get('access_token'), session.get('region_host'))
 	if not voicemails:
 		voicemails = []
