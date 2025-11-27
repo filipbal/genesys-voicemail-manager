@@ -135,7 +135,8 @@
                         <th scope="col">#</th>
                         <th scope="col">Caller</th>
                         <th scope="col">Phone Number</th>
-                        <th scope="col">Date & Time</th>
+                        <th scope="col">Created</th>
+                        <th scope="col">Modified</th>
                         <th scope="col">Duration</th>
                         <th scope="col">Status</th>
                         <th scope="col" class="text-center">Actions</th>
@@ -148,6 +149,11 @@
                         <td>
                             <i class="bi bi-person me-1 text-muted"></i>
                             {{ vm.caller_name }}
+                            {% if vm.is_forwarded %}
+                            <br><small class="text-info">
+                                <i class="bi bi-forward-fill me-1"></i>Fwd by: {{ vm.forwarded_by or 'Unknown' }}
+                            </small>
+                            {% endif %}
                         </td>
                         <td>
                             <code>{{ vm.caller_address or 'N/A' }}</code>
@@ -156,11 +162,20 @@
                             <small>{{ vm.created_date }}</small>
                         </td>
                         <td>
+                            {% if vm.modified_date and vm.modified_date != vm.created_date %}
+                            <small class="text-muted">{{ vm.modified_date }}</small>
+                            {% else %}
+                            <small class="text-muted">-</small>
+                            {% endif %}
+                        </td>
+                        <td>
                             <i class="bi bi-clock me-1 text-muted"></i>
                             {{ vm.duration }}
                         </td>
                         <td>
-                            {% if vm.read %}
+                            {% if vm.is_forwarded %}
+                            <span class="badge bg-info">Forwarded</span>
+                            {% elif vm.read %}
                             <span class="badge bg-secondary">Read</span>
                             {% else %}
                             <span class="badge bg-primary">New</span>

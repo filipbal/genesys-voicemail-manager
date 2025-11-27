@@ -77,7 +77,8 @@
 						<th scope="col">#</th>
 						<th scope="col">Caller</th>
 						<th scope="col">Phone Number</th>
-						<th scope="col">Date & Time</th>
+						<th scope="col">Created</th>
+						<th scope="col">Modified</th>
 						<th scope="col">Duration</th>
 					</tr>
 				</thead>
@@ -92,12 +93,24 @@
 						<td>
 							<i class="bi bi-person me-1 text-muted"></i>
 							{{ vm.caller_name }}
+							{% if vm.is_forwarded %}
+							<br><small class="text-info">
+								<i class="bi bi-forward-fill me-1"></i>Fwd by: {{ vm.forwarded_by or 'Unknown' }}
+							</small>
+							{% endif %}
 						</td>
 						<td>
 							<code>{{ vm.caller_address or 'N/A' }}</code>
 						</td>
 						<td>
 							<small>{{ vm.created_date }}</small>
+						</td>
+						<td>
+							{% if vm.modified_date and vm.modified_date != vm.created_date %}
+							<small class="text-muted">{{ vm.modified_date }}</small>
+							{% else %}
+							<small class="text-muted">-</small>
+							{% endif %}
 						</td>
 						<td>
 							<i class="bi bi-clock me-1 text-muted"></i>
@@ -333,23 +346,18 @@ function executeDelete() {
 	const progressModal = new bootstrap.Modal(document.getElementById('progressModal'));
 	progressModal.show();
 	
-	// Estimate time - significantly slowed down
 	const batches = Math.ceil(selectedVoicemails.length / BATCH_SIZE);
-	// Assume ~1s per batch + overhead, but make progress bar move slower
-	// to avoid getting stuck at 95% too early.
 	const estimatedSeconds = batches * 1.5 + 5; 
 	
 	let progress = 0;
 	const progressInterval = setInterval(() => {
-		// Increment much smaller amounts to prolong the bar
-		// Aim to reach 90% in estimatedSeconds
 		const increment = (90 / (estimatedSeconds * 10)); 
 		progress += increment;
 		
 		if (progress > 95) progress = 95;
 		document.getElementById('progressBar').style.width = progress + '%';
 		document.getElementById('progressBar').textContent = Math.round(progress) + '%';
-	}, 100); // Update every 100ms
+	}, 100);
 	
 	// Show loading state on button
 	const btn = document.getElementById('finalDeleteBtn');
@@ -399,10 +407,9 @@ function showResults(data) {
 	
 	let html = '';
 	
-	// Use data.deleted if available, fallback to calculation or 0
-	const deletedCount = data.deleted !== undefined ? data.deleted : (data.success ? data.total : 0);
+	const deletedCount = data.success !== undefined ? data.success : 0;
 
-	if (data.success) {
+	if (data.failed === 0) {
 		resultsHeader.className = 'modal-header bg-success text-white';
 		resultsTitle.innerHTML = '<i class="bi bi-check-circle me-2"></i>Deletion Complete';
 		html = `

@@ -66,7 +66,8 @@
                         <th scope="col">#</th>
                         <th scope="col">Caller</th>
                         <th scope="col">Phone Number</th>
-                        <th scope="col">Date & Time</th>
+                        <th scope="col">Created</th>
+                        <th scope="col">Modified</th>
                         <th scope="col">Duration</th>
                     </tr>
                 </thead>
@@ -83,12 +84,24 @@
                         <td>
                             <i class="bi bi-person me-1 text-muted"></i>
                             {{ vm.caller_name }}
+                            {% if vm.is_forwarded %}
+                            <br><small class="text-info">
+                                <i class="bi bi-forward-fill me-1"></i>Fwd by: {{ vm.forwarded_by or 'Unknown' }}
+                            </small>
+                            {% endif %}
                         </td>
                         <td>
                             <code>{{ vm.caller_address or 'N/A' }}</code>
                         </td>
                         <td>
                             <small>{{ vm.created_date }}</small>
+                        </td>
+                        <td>
+                            {% if vm.modified_date and vm.modified_date != vm.created_date %}
+                            <small class="text-muted">{{ vm.modified_date }}</small>
+                            {% else %}
+                            <small class="text-muted">-</small>
+                            {% endif %}
                         </td>
                         <td>
                             <i class="bi bi-clock me-1 text-muted"></i>
@@ -167,11 +180,11 @@
 
 <script>
 // Configuration
-const BATCH_SIZE = {{ batch_size }};  // 10 files per batch for downloads
-const FILE_DELAY = 500;          // 0.5s between files
-const BATCH_DELAY = 3000;        // 3s between batches
-const SUPER_BATCH_SIZE = 5;      // Batches before super break
-const SUPER_BATCH_DELAY = 10000; // 10s super break
+const BATCH_SIZE = {{ batch_size }};
+const FILE_DELAY = 500;
+const BATCH_DELAY = 3000;
+const SUPER_BATCH_SIZE = 5;
+const SUPER_BATCH_DELAY = 10000;
 
 let selectedVoicemails = [];
 let isDownloading = false;
