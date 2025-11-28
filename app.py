@@ -333,21 +333,39 @@ def get_all_voicemails(access_token, region_host, user_id=None, mailbox_type='us
 			time.sleep(API_DELAY_GET)
 
 	elif mailbox_type == 'group':
-		# Use GET endpoint for group voicemails
+		# Use POST search for group voicemails (same pattern as user voicemails)
 		if not mailbox_id:
 			return None, "Group ID required for group mailbox"
 
-		url = f"https://api.{region_host}/api/v2/voicemail/groups/{mailbox_id}/messages"
+		url = f"https://api.{region_host}/api/v2/voicemail/search"
 		page_number = 1
 		page_size = API_PAGE_SIZE
 
-		app.logger.info(f"Fetching voicemails for group {mailbox_id}...")
+		search_body = {
+			"pageSize": page_size,
+			"pageNumber": page_number,
+			"query": [
+				{
+					"fields": ["owner"],
+					"type": "EXACT",
+					"value": "group"
+				},
+				{
+					"fields": ["ownerId"],
+					"type": "EXACT",
+					"value": mailbox_id
+				}
+			]
+		}
+
+		app.logger.info(f"Fetching voicemails for group {mailbox_id} via POST search...")
+
+		total_expected = None
 
 		while True:
-			params = {'pageSize': page_size, 'pageNumber': page_number}
-			url_with_params = f"{url}?{urllib.parse.urlencode(params)}"
+			search_body["pageNumber"] = page_number
 
-			data, error = make_api_request(url_with_params, access_token)
+			data, error = make_api_request(url, access_token, method='POST', data=search_body)
 
 			if error:
 				app.logger.error(f"Error fetching page {page_number}: {error}")
@@ -355,12 +373,16 @@ def get_all_voicemails(access_token, region_host, user_id=None, mailbox_type='us
 					return None, error
 				break
 
-			entities = data.get('entities', [])
-			all_entities.extend(entities)
+			results = data.get('results', [])
+			all_entities.extend(results)
+
+			if total_expected is None:
+				total_expected = data.get('total', 0)
+				app.logger.info(f"API reports {total_expected} total group voicemails")
 
 			page_count = data.get('pageCount', 0)
 
-			if page_number >= page_count or not entities:
+			if page_number >= page_count or not results:
 				break
 
 			page_number += 1
@@ -435,69 +457,34 @@ def search_groups(access_token, region_host, query):
 def get_user_groups(access_token, region_host):
 	"""
 	Fetch all groups that the current user is a member of.
-	Uses /api/v2/users/me to get user ID, then fetches their groups.
+	Uses /api/v2/users/me?expand=groups to get user's groups.
 	This ensures only groups where the user is an owner/member are returned.
 	"""
-	# Get current user info first
-	user_info = get_user_info(access_token, region_host)
-	if not user_info:
-		app.logger.error("Could not get user info for fetching groups")
-		return [], None  # Return empty list instead of None
+	# Use expand parameter to get groups in single request
+	url = f"https://api.{region_host}/api/v2/users/me?expand=groups"
 
-	user_id = user_info.get('id')
+	app.logger.info("Fetching user info with groups expansion...")
 
-	all_groups = []
-	page_number = 1
-	page_size = API_PAGE_SIZE
+	data, error = make_api_request(url, access_token)
 
-	# Use the user-specific groups endpoint to ensure we only get groups the user is a member of
-	url = f"https://api.{region_host}/api/v2/users/{user_id}/groups"
+	if error:
+		app.logger.error(f"Error fetching user with groups: {error}")
+		return [], None
 
-	app.logger.info(f"Fetching groups for user {user_id}...")
+	if not data:
+		app.logger.warning("No data returned from user API")
+		return [], None
 
-	while True:
-		params = {'pageSize': page_size, 'pageNumber': page_number}
-		url_with_params = f"{url}?{urllib.parse.urlencode(params)}"
+	# Extract groups from the expanded response
+	groups = data.get('groups', [])
 
-		data, error = make_api_request(url_with_params, access_token)
-
-		if error:
-			app.logger.error(f"Error fetching groups page {page_number}: {error}")
-			if page_number == 1:
-				# Return empty list on error instead of None
-				return [], None
-			break
-
-		if not data:
-			app.logger.warning(f"No data returned from groups API for page {page_number}")
-			break
-
-		# Log the full response for debugging
-		app.logger.debug(f"Groups API response keys: {data.keys() if data else 'None'}")
-
-		entities = data.get('entities', [])
-		all_groups.extend(entities)
-
-		app.logger.info(f"Page {page_number}: Found {len(entities)} groups")
-
-		page_count = data.get('pageCount', 0)
-		total = data.get('total', 0)
-
-		app.logger.debug(f"Page {page_number}/{page_count}, Total groups: {total}")
-
-		if page_number >= page_count or not entities:
-			break
-
-		page_number += 1
-		time.sleep(API_DELAY_GET)
-
-	app.logger.info(f"Fetched {len(all_groups)} total groups where user is a member")
+	app.logger.info(f"Fetched {len(groups)} total groups where user is a member")
 
 	# Log group details for debugging
-	for group in all_groups:
+	for group in groups:
 		app.logger.debug(f"Group: {group.get('name')} (ID: {group.get('id')}, Members: {group.get('memberCount', 0)})")
 
-	return all_groups, None
+	return groups, None
 
 # ============================================================================
 # OPERATIONS
