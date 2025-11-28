@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """
-Genesys Cloud Voicemail Manager - v16
+Genesys Cloud Voicemail Manager - v17
 ==========================================
-CHANGES FROM v15:
-- Added VM ID column to dashboard/forward/delete views
-- Merged Caller and Phone Number into Original Caller column
-- Added Forwarded To column showing copiedTo targets
+CHANGES FROM v16:
+- Added group voicemail inbox viewing capability
+- Users can now switch between their personal mailbox and group mailboxes
+- Mailbox selector dropdown in all pages (dashboard, download, forward, delete)
+- Session persistence for selected mailbox across page navigation
+- Support for GET /api/v2/voicemail/groups/{groupId}/messages endpoint
 """
 
 import os
@@ -118,6 +120,52 @@ def login_required(f):
 		return f(*args, **kwargs)
 	return decorated_function
 
+# ============================================================================
+# MAILBOX SELECTION HELPERS
+# ============================================================================
+
+def get_current_mailbox():
+	"""
+	Get the currently selected mailbox from session.
+	Returns dict with keys: type ('user' or 'group'), id, name
+	If not set, returns default user mailbox.
+	"""
+	if 'current_mailbox' in session:
+		return session['current_mailbox']
+
+	# Default to user's own mailbox
+	user_info = session.get('user_info', {})
+	return {
+		'type': 'user',
+		'id': user_info.get('id'),
+		'name': user_info.get('name', 'My Voicemails')
+	}
+
+def set_current_mailbox(mailbox_type, mailbox_id, mailbox_name):
+	"""
+	Set the current mailbox in session.
+
+	Args:
+		mailbox_type: 'user' or 'group'
+		mailbox_id: ID of the user or group
+		mailbox_name: Display name for the mailbox
+	"""
+	session['current_mailbox'] = {
+		'type': mailbox_type,
+		'id': mailbox_id,
+		'name': mailbox_name
+	}
+	app.logger.info(f"Switched to mailbox: {mailbox_type} - {mailbox_name} ({mailbox_id})")
+
+def initialize_default_mailbox():
+	"""
+	Initialize the mailbox to the user's own mailbox if not already set.
+	Should be called after login.
+	"""
+	if 'current_mailbox' not in session:
+		user_info = session.get('user_info', {})
+		set_current_mailbox('user', user_info.get('id'), user_info.get('name', 'My Voicemails'))
+
 def exchange_code_for_token(auth_code, region_host, code_verifier):
 	token_url = f"https://login.{region_host}/oauth/token"
 	
@@ -207,79 +255,156 @@ def get_user_info(access_token, region_host):
 		return None
 	return data
 
-def get_all_voicemails(access_token, region_host, user_id=None):
+def get_all_voicemails(access_token, region_host, user_id=None, mailbox_type='user', mailbox_id=None):
+	"""
+	Fetch voicemails for either a user or group mailbox.
+
+	Args:
+		access_token: OAuth bearer token
+		region_host: API region host
+		user_id: User ID (only used when mailbox_type='user' and mailbox_id is None)
+		mailbox_type: Either 'user' or 'group'
+		mailbox_id: ID of the user or group to fetch voicemails for
+	"""
 	all_entities = []
-	
-	if not user_id:
-		user_info = get_user_info(access_token, region_host)
-		if not user_info:
-			return None, "Could not get user info"
-		user_id = user_info.get('id')
-	
-	url = f"https://api.{region_host}/api/v2/voicemail/search"
-	page_number = 1
-	page_size = API_PAGE_SIZE
-	
-	search_body = {
-		"pageSize": page_size,
-		"pageNumber": page_number,
-		"query": [
-			{
-				"fields": ["owner"],
-				"type": "EXACT",
-				"value": "user"
-			},
-			{
-				"fields": ["ownerId"],
-				"type": "EXACT",
-				"value": user_id
-			}
-		]
-	}
-	
-	app.logger.info(f"Fetching voicemails for user {user_id} via POST search...")
-	
-	total_expected = None
-	
-	while True:
-		search_body["pageNumber"] = page_number
-		
-		data, error = make_api_request(url, access_token, method='POST', data=search_body)
-		
-		if error:
-			app.logger.error(f"Error fetching page {page_number}: {error}")
-			if page_number == 1:
-				return None, error
-			break
-		
-		results = data.get('results', [])
-		all_entities.extend(results)
-		
-		if total_expected is None:
-			total_expected = data.get('total', 0)
-			app.logger.info(f"API reports {total_expected} total voicemails")
-		
-		page_count = data.get('pageCount', 0)
-		
-		if page_number >= page_count or not results:
-			break
-			
-		page_number += 1
-		time.sleep(API_DELAY_GET)
-	
+
+	# Determine the actual ID to use
+	if mailbox_type == 'user':
+		# For user mailbox, use mailbox_id if provided, otherwise use user_id or fetch current user
+		if not mailbox_id:
+			if not user_id:
+				user_info = get_user_info(access_token, region_host)
+				if not user_info:
+					return None, "Could not get user info"
+				mailbox_id = user_info.get('id')
+			else:
+				mailbox_id = user_id
+
+		# Use POST search for user voicemails
+		url = f"https://api.{region_host}/api/v2/voicemail/search"
+		page_number = 1
+		page_size = API_PAGE_SIZE
+
+		search_body = {
+			"pageSize": page_size,
+			"pageNumber": page_number,
+			"query": [
+				{
+					"fields": ["owner"],
+					"type": "EXACT",
+					"value": "user"
+				},
+				{
+					"fields": ["ownerId"],
+					"type": "EXACT",
+					"value": mailbox_id
+				}
+			]
+		}
+
+		app.logger.info(f"Fetching voicemails for user {mailbox_id} via POST search...")
+
+		total_expected = None
+
+		while True:
+			search_body["pageNumber"] = page_number
+
+			data, error = make_api_request(url, access_token, method='POST', data=search_body)
+
+			if error:
+				app.logger.error(f"Error fetching page {page_number}: {error}")
+				if page_number == 1:
+					return None, error
+				break
+
+			results = data.get('results', [])
+			all_entities.extend(results)
+
+			if total_expected is None:
+				total_expected = data.get('total', 0)
+				app.logger.info(f"API reports {total_expected} total voicemails")
+
+			page_count = data.get('pageCount', 0)
+
+			if page_number >= page_count or not results:
+				break
+
+			page_number += 1
+			time.sleep(API_DELAY_GET)
+
+	elif mailbox_type == 'group':
+		# Use POST search for group voicemails (same pattern as user voicemails)
+		if not mailbox_id:
+			return None, "Group ID required for group mailbox"
+
+		url = f"https://api.{region_host}/api/v2/voicemail/search"
+		page_number = 1
+		page_size = API_PAGE_SIZE
+
+		search_body = {
+			"pageSize": page_size,
+			"pageNumber": page_number,
+			"query": [
+				{
+					"fields": ["owner"],
+					"type": "EXACT",
+					"value": "group"
+				},
+				{
+					"fields": ["ownerId"],
+					"type": "EXACT",
+					"value": mailbox_id
+				}
+			]
+		}
+
+		app.logger.info(f"Fetching voicemails for group {mailbox_id} via POST search...")
+
+		total_expected = None
+
+		while True:
+			search_body["pageNumber"] = page_number
+
+			data, error = make_api_request(url, access_token, method='POST', data=search_body)
+
+			if error:
+				app.logger.error(f"Error fetching page {page_number}: {error}")
+				if page_number == 1:
+					return None, error
+				break
+
+			results = data.get('results', [])
+			all_entities.extend(results)
+
+			if total_expected is None:
+				total_expected = data.get('total', 0)
+				app.logger.info(f"API reports {total_expected} total group voicemails")
+
+			page_count = data.get('pageCount', 0)
+
+			if page_number >= page_count or not results:
+				break
+
+			page_number += 1
+			time.sleep(API_DELAY_GET)
+
+	else:
+		return None, f"Invalid mailbox_type: {mailbox_type}"
+
+	# Post-processing: deduplicate, filter deleted, and sort
 	unique_map = {v['id']: v for v in all_entities}
 	unique_entities = list(unique_map.values())
-	
+
 	active_voicemails = [v for v in unique_entities if not v.get('deleted', False)]
-	
+
 	active_voicemails.sort(key=lambda vm: vm.get('createdDate', ''), reverse=True)
-	
+
 	app.logger.info(
-		f"Fetch Complete: {len(all_entities)} raw, "
+		f"Fetch Complete ({mailbox_type}): {len(all_entities)} raw, "
 		f"{len(unique_entities)} unique, "
 		f"{len(active_voicemails)} active."
 	)
-	
+
 	return active_voicemails, None
 
 def download_voicemail_media(access_token, region_host, message_id):
@@ -328,6 +453,38 @@ def search_groups(access_token, region_host, query):
 	data, error = make_api_request(url, access_token, method='POST', data=search_body)
 	if error: return None, error
 	return data.get('results', []), None
+
+def get_user_groups(access_token, region_host):
+	"""
+	Fetch all groups that the current user is a member of.
+	Uses /api/v2/users/me?expand=groups to get user's groups.
+	This ensures only groups where the user is an owner/member are returned.
+	"""
+	# Use expand parameter to get groups in single request
+	url = f"https://api.{region_host}/api/v2/users/me?expand=groups"
+
+	app.logger.info("Fetching user info with groups expansion...")
+
+	data, error = make_api_request(url, access_token)
+
+	if error:
+		app.logger.error(f"Error fetching user with groups: {error}")
+		return [], None
+
+	if not data:
+		app.logger.warning("No data returned from user API")
+		return [], None
+
+	# Extract groups from the expanded response
+	groups = data.get('groups', [])
+
+	app.logger.info(f"Fetched {len(groups)} total groups where user is a member")
+
+	# Log group details for debugging
+	for group in groups:
+		app.logger.debug(f"Group: {group.get('name')} (ID: {group.get('id')}, Members: {group.get('memberCount', 0)})")
+
+	return groups, None
 
 # ============================================================================
 # OPERATIONS
@@ -772,18 +929,45 @@ def callback():
 def dashboard():
 	token = session.get('access_token')
 	host = session.get('region_host')
-	
-	voicemails, error = get_all_voicemails(token, host)
-	
+
+	# Initialize default mailbox if not set
+	initialize_default_mailbox()
+
+	# Fetch user's groups
+	user_groups, groups_error = get_user_groups(token, host)
+	if groups_error:
+		app.logger.warning(f"Error fetching groups: {groups_error}")
+		user_groups = []
+
+	# Ensure user_groups is always a list
+	if user_groups is None:
+		user_groups = []
+
+	# Debug logging
+	app.logger.info(f"Dashboard: user_groups count = {len(user_groups)}")
+	if user_groups:
+		app.logger.info(f"Dashboard: First group = {user_groups[0].get('name', 'Unknown')}")
+
+	# Get current mailbox
+	current_mailbox = get_current_mailbox()
+
+	# Fetch voicemails for the selected mailbox
+	voicemails, error = get_all_voicemails(
+		token,
+		host,
+		mailbox_type=current_mailbox['type'],
+		mailbox_id=current_mailbox['id']
+	)
+
 	if error:
 		flash(f"Error fetching voicemails: {error}", 'warning')
 		voicemails = []
-		
+
 	formatted = [format_voicemail(vm) for vm in voicemails]
 	preview = formatted[:20]
-	
+
 	total_sec = sum(vm.get('audioRecordingDurationSeconds', 0) or 0 for vm in voicemails)
-	
+
 	return render_template('dashboard.html',
 						 user_info=session.get('user_info'),
 						 region=REGIONS.get(session.get('region_key')),
@@ -791,7 +975,9 @@ def dashboard():
 						 voicemail_count=len(formatted),
 						 preview_count=len(preview),
 						 total_duration_minutes=round(total_sec/60, 1),
-						 enable_downloads=ENABLE_DOWNLOADS)
+						 enable_downloads=ENABLE_DOWNLOADS,
+						 user_groups=user_groups,
+						 current_mailbox=current_mailbox)
 
 @app.route('/download/<message_id>')
 @login_required
@@ -829,7 +1015,26 @@ def download_page():
 	if not ENABLE_DOWNLOADS:
 		flash('Download functionality is currently disabled.', 'warning')
 		return redirect(url_for('dashboard'))
-	voicemails, _ = get_all_voicemails(session.get('access_token'), session.get('region_host'))
+
+	# Initialize default mailbox if not set
+	initialize_default_mailbox()
+
+	# Fetch user's groups
+	user_groups, _ = get_user_groups(session.get('access_token'), session.get('region_host'))
+	# Ensure user_groups is always a list
+	if not user_groups or user_groups is None:
+		user_groups = []
+
+	# Get current mailbox
+	current_mailbox = get_current_mailbox()
+
+	# Fetch voicemails for the selected mailbox
+	voicemails, _ = get_all_voicemails(
+		session.get('access_token'),
+		session.get('region_host'),
+		mailbox_type=current_mailbox['type'],
+		mailbox_id=current_mailbox['id']
+	)
 	if not voicemails:
 		voicemails = []
 	formatted = [format_voicemail(vm) for vm in voicemails]
@@ -838,7 +1043,9 @@ def download_page():
 						 region=REGIONS.get(session.get('region_key')),
 						 voicemails=formatted,
 						 voicemail_count=len(formatted),
-						 batch_size=DOWNLOAD_BATCH_SIZE)
+						 batch_size=DOWNLOAD_BATCH_SIZE,
+						 user_groups=user_groups,
+						 current_mailbox=current_mailbox)
 
 @app.route('/download-prepare', methods=['POST'])
 @login_required
@@ -846,8 +1053,17 @@ def download_prepare():
 	schedule_keepalive()
 	data = request.get_json()
 	ids = set(data.get('voicemail_ids', []))
-	
-	all_vms, _ = get_all_voicemails(session.get('access_token'), session.get('region_host'))
+
+	# Get current mailbox
+	current_mailbox = get_current_mailbox()
+
+	# Fetch voicemails for the selected mailbox
+	all_vms, _ = get_all_voicemails(
+		session.get('access_token'),
+		session.get('region_host'),
+		mailbox_type=current_mailbox['type'],
+		mailbox_id=current_mailbox['id']
+	)
 	selected = [vm for vm in all_vms if vm['id'] in ids]
 	
 	if not selected:
@@ -923,26 +1139,66 @@ def api_batch_status():
 @app.route('/forward')
 @login_required
 def forward_page():
-	voicemails, _ = get_all_voicemails(session.get('access_token'), session.get('region_host'))
+	# Initialize default mailbox if not set
+	initialize_default_mailbox()
+
+	# Fetch user's groups
+	user_groups, _ = get_user_groups(session.get('access_token'), session.get('region_host'))
+	# Ensure user_groups is always a list
+	if not user_groups or user_groups is None:
+		user_groups = []
+
+	# Get current mailbox
+	current_mailbox = get_current_mailbox()
+
+	# Fetch voicemails for the selected mailbox
+	voicemails, _ = get_all_voicemails(
+		session.get('access_token'),
+		session.get('region_host'),
+		mailbox_type=current_mailbox['type'],
+		mailbox_id=current_mailbox['id']
+	)
 	formatted = [format_voicemail(vm) for vm in (voicemails or [])]
 	return render_template('forward.html',
 						 user_info=session.get('user_info'),
 						 region=REGIONS.get(session.get('region_key')),
 						 voicemails=formatted,
 						 voicemail_count=len(formatted),
-						 batch_size=BATCH_SIZE)
+						 batch_size=BATCH_SIZE,
+						 user_groups=user_groups,
+						 current_mailbox=current_mailbox)
 
 @app.route('/delete')
 @login_required
 def delete_page():
-	voicemails, _ = get_all_voicemails(session.get('access_token'), session.get('region_host'))
+	# Initialize default mailbox if not set
+	initialize_default_mailbox()
+
+	# Fetch user's groups
+	user_groups, _ = get_user_groups(session.get('access_token'), session.get('region_host'))
+	# Ensure user_groups is always a list
+	if not user_groups or user_groups is None:
+		user_groups = []
+
+	# Get current mailbox
+	current_mailbox = get_current_mailbox()
+
+	# Fetch voicemails for the selected mailbox
+	voicemails, _ = get_all_voicemails(
+		session.get('access_token'),
+		session.get('region_host'),
+		mailbox_type=current_mailbox['type'],
+		mailbox_id=current_mailbox['id']
+	)
 	formatted = [format_voicemail(vm) for vm in (voicemails or [])]
 	return render_template('delete.html',
 						 user_info=session.get('user_info'),
 						 region=REGIONS.get(session.get('region_key')),
 						 voicemails=formatted,
 						 voicemail_count=len(formatted),
-						 batch_size=BATCH_SIZE)
+						 batch_size=BATCH_SIZE,
+						 user_groups=user_groups,
+						 current_mailbox=current_mailbox)
 
 @app.route('/api/forward', methods=['POST'])
 @login_required
@@ -979,6 +1235,27 @@ def api_group_search():
 	res, _ = search_groups(session.get('access_token'), session.get('region_host'), request.args.get('q',''))
 	return jsonify({'groups': [{'id': g['id'], 'name': g['name'], 'memberCount': g.get('memberCount',0)} for g in res]})
 
+@app.route('/api/switch-mailbox', methods=['POST'])
+@login_required
+def api_switch_mailbox():
+	"""API endpoint to switch the currently selected mailbox"""
+	data = request.get_json()
+	mailbox_type = data.get('type')
+	mailbox_id = data.get('id')
+	mailbox_name = data.get('name')
+
+	# Validate input
+	if not mailbox_type or mailbox_type not in ['user', 'group']:
+		return jsonify({'success': False, 'error': 'Invalid mailbox type'}), 400
+
+	if not mailbox_id or not mailbox_name:
+		return jsonify({'success': False, 'error': 'Missing mailbox id or name'}), 400
+
+	# Set the mailbox in session
+	set_current_mailbox(mailbox_type, mailbox_id, mailbox_name)
+
+	return jsonify({'success': True})
+
 @app.route('/logout')
 def logout():
 	session.clear()
@@ -986,7 +1263,7 @@ def logout():
 
 @app.route('/health')
 def health():
-	return jsonify({'status': 'healthy', 'version': 'v16-vm-id-column'})
+	return jsonify({'status': 'healthy', 'version': 'v17-group-voicemail-inbox'})
 
 @app.route('/documentation')
 def documentation():
