@@ -560,11 +560,14 @@ def process_voicemails_in_batches(access_token, region_host, voicemail_ids, oper
 					# Extract original creation date and caller info
 					original_created = vm_data.get('createdDate')
 					original_caller_name = vm_data.get('callerName', 'Unknown')
-					conversation_id = vm_data.get('conversation.id')
+
+					# FIX 1: Safely get nested conversation ID
+					conversation_id = vm_data.get('conversation', {}).get('id')
 
 					# Save original date to data table if applicable
 					if conversation_id and original_created:
-						save_original_date(session.get('access_token'), session.get('region'), DATATABLE_ID, conversation_id, original_created)
+						# FIX 2: Use local variables (access_token, region_host) instead of session
+						save_original_date(access_token, region_host, DATATABLE_ID, conversation_id, original_created)
 
 					# Build forward body with embedded timestamp
 					url = f"https://api.{region_host}/api/v2/voicemail/messages"
@@ -675,13 +678,16 @@ def format_voicemail(vm, access_token, region_host):
 		copied_from_user = copied_from.get('user', {})
 		forwarded_by = copied_from_user.get('name', 'Unknown')
 		
-		# For forwarded messages:
-		# - Use embedded_date if available (from our custom forward)
-		# - Otherwise fall back to copiedFrom.date
 		forwarded_date = created
-		if is_forwarded and conversation_id:
+		original_date = None
+
+		# 1. Priority: Try Data Table
+		if conversation_id:
+			# Ensure access_token/region_host are passed to format_voicemail arguments
 			original_date = get_original_date(access_token, region_host, DATATABLE_ID, conversation_id)
-		else:
+
+		# 2. Fallback: Use embedded date or standard copied date if Data Table failed
+		if not original_date:
 			original_date = embedded_date if embedded_date else copied_from.get('date')
 	
 	# Extract forwarded_to from copiedTo array (where this VM was sent)
