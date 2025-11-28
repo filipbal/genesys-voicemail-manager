@@ -554,7 +554,7 @@ def process_voicemails_in_batches(access_token, region_host, voicemail_ids, oper
 					
 					# Embed original date in callerName: [YYYY-MM-DDTHH:MM:SS.sssZ] Original Caller
 					if original_created:
-						body["callerName"] = f"[{original_created}] {original_caller_name}"
+						body["callerAddress"] = f"[{original_created}] {original_caller_name}"
 					
 					response_data, err = make_api_request(url, access_token, 'POST', body)
 					success = (err is None)
@@ -622,19 +622,21 @@ def format_voicemail(vm):
 	
 	# Original caller info - check for embedded timestamp in callerName
 	caller_name = vm.get('callerName', '')
-	caller_address = vm.get('callerAddress', '')
-	
-	# Parse embedded original timestamp from callerName: [2022-10-20T15:21:27.166Z] Actual Name
-	embedded_date = None
-	if caller_name.startswith('[') and ']' in caller_name:
-		try:
-			end_bracket = caller_name.index(']')
-			embedded_date = caller_name[1:end_bracket].strip()
-			caller_name = caller_name[end_bracket + 1:].strip()  # Remove timestamp prefix
-		except:
-			pass
-	
-	original_caller = caller_name if caller_name else caller_address if caller_address else 'Unknown'
+caller_address = vm.get('callerAddress', '')
+
+# Parse embedded original timestamp - check both fields
+embedded_date = None
+source_field = caller_name if caller_name else caller_address
+
+if source_field.startswith('[') and ']' in source_field:
+	try:
+		end_bracket = source_field.index(']')
+		embedded_date = source_field[1:end_bracket].strip()
+		source_field = source_field[end_bracket + 1:].strip()
+	except:
+		pass
+
+original_caller = caller_name if caller_name else source_field if source_field else 'Unknown'
 	
 	# Forwarding info (received as forward)
 	is_forwarded = copied_from is not None
