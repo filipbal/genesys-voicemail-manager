@@ -433,14 +433,26 @@ def search_groups(access_token, region_host, query):
 	return data.get('results', []), None
 
 def get_user_groups(access_token, region_host):
-	"""Fetch all groups that the current user is a member of"""
+	"""
+	Fetch all groups that the current user is a member of.
+	Uses /api/v2/users/me to get user ID, then fetches their groups.
+	This ensures only groups where the user is an owner/member are returned.
+	"""
+	# Get current user info first
+	user_info = get_user_info(access_token, region_host)
+	if not user_info:
+		return None, "Could not get user info"
+
+	user_id = user_info.get('id')
+
 	all_groups = []
 	page_number = 1
 	page_size = API_PAGE_SIZE
 
-	url = f"https://api.{region_host}/api/v2/groups"
+	# Use the user-specific groups endpoint to ensure we only get groups the user is a member of
+	url = f"https://api.{region_host}/api/v2/users/{user_id}/groups"
 
-	app.logger.info("Fetching user groups...")
+	app.logger.info(f"Fetching groups for user {user_id}...")
 
 	while True:
 		params = {'pageSize': page_size, 'pageNumber': page_number}
@@ -465,7 +477,7 @@ def get_user_groups(access_token, region_host):
 		page_number += 1
 		time.sleep(API_DELAY_GET)
 
-	app.logger.info(f"Fetched {len(all_groups)} groups")
+	app.logger.info(f"Fetched {len(all_groups)} groups where user is a member")
 	return all_groups, None
 
 # ============================================================================
