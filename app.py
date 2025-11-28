@@ -45,6 +45,7 @@ app.config['PERMANENT_SESSION_LIFETIME'] = 3600
 # ============================================================================
 
 CLIENT_ID = os.environ.get('GENESYS_CLIENT_ID', '')
+DATATABLE_ID = os.environ.get('GENESYS_DATATABLE_ID', '') 
 
 if not CLIENT_ID:
 	CLIENT_ID = ''
@@ -92,6 +93,23 @@ user_operation_locks = defaultdict(threading.Lock)
 from queue import Queue
 batch_queue = Queue()
 batch_worker_running = False
+
+# Data Table manipulation for original timestamp storage
+def save_original_date(access_token, region_host, datatable_id, conversation_id, original_date):
+	"""Write original date to data table"""
+	url = f"https://api.{region_host}/api/v2/flows/datatables/{datatable_id}/rows/{conversation_id}"
+	data = {"key": conversation_id, "originalCreatedDate": original_date}
+	_, error = make_api_request(url, access_token, method='PUT', data=data)
+	return error is None
+
+def get_original_date(access_token, region_host, datatable_id, conversation_id):
+	"""Read original date from data table"""
+	url = f"https://api.{region_host}/api/v2/flows/datatables/{datatable_id}/rows/{conversation_id}"
+	data, error = make_api_request(url, access_token)
+	if error:
+		return None
+	return data.get('originalCreatedDate')
+	
 
 # ============================================================================
 # AUTHENTICATION HELPERS
@@ -542,7 +560,12 @@ def process_voicemails_in_batches(access_token, region_host, voicemail_ids, oper
 					# Extract original creation date and caller info
 					original_created = vm_data.get('createdDate')
 					original_caller_name = vm_data.get('callerName', 'Unknown')
-					
+					conversation_id = vm_data.get('conversation.id')
+
+					# Save original date to data table if applicable
+					if conversation_id and original_created:
+						save_original_date(access_token, region_host, DATATABLE_ID, conversation_id, original_created)
+
 					# Build forward body with embedded timestamp
 					url = f"https://api.{region_host}/api/v2/voicemail/messages"
 					body = {"voicemailMessageId": vm_id}
@@ -624,6 +647,9 @@ def format_voicemail(vm):
 	caller_name = vm.get('callerName', '')
 	caller_address = vm.get('callerAddress', '')
 
+	# Conversation ID for data table lookup
+	conversation_id = vm.get('conversation', {}).get('id')
+
 	# Parse embedded original timestamp - check both fields
 	embedded_date = None
 	source_field = caller_name if caller_name else caller_address
@@ -653,7 +679,10 @@ def format_voicemail(vm):
 		# - Use embedded_date if available (from our custom forward)
 		# - Otherwise fall back to copiedFrom.date
 		forwarded_date = created
-		original_date = embedded_date if embedded_date else copied_from.get('date')
+		if is_forwarded and conversation_id:
+			original_date = get_original_date(access_token, region_host, DATATABLE_ID, conversation_id)
+		else:
+			original_date = embedded_date if embedded_date else copied_from.get('date')
 	
 	# Extract forwarded_to from copiedTo array (where this VM was sent)
 	copied_to = vm.get('copiedTo', [])
