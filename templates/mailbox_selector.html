@@ -1,0 +1,96 @@
+<!-- Mailbox Selector Component -->
+{% if current_mailbox and user_groups is defined %}
+<div class="mailbox-selector">
+    <div class="d-flex align-items-center">
+        <div class="me-2">
+            {% if current_mailbox.type == 'group' %}
+            <i class="bi bi-people-fill fs-5"></i>
+            {% else %}
+            <i class="bi bi-person-fill fs-5"></i>
+            {% endif %}
+        </div>
+        <div class="flex-grow-1">
+            <div class="dropdown">
+                <button class="btn btn-light btn-sm dropdown-toggle w-100 text-start" type="button" id="mailboxDropdown" data-bs-toggle="dropdown" aria-expanded="false">
+                    <strong>Viewing:</strong>
+                    {% if current_mailbox.type == 'group' %}
+                    Group - {{ current_mailbox.name }}
+                    {% else %}
+                    My Voicemails
+                    {% endif %}
+                </button>
+                <ul class="dropdown-menu w-100" aria-labelledby="mailboxDropdown">
+                    <!-- User's own mailbox -->
+                    <li>
+                        <a class="dropdown-item {% if current_mailbox.type == 'user' %}active{% endif %}"
+                           href="#"
+                           onclick="switchMailbox('user', '{{ user_info.get('id') }}', '{{ user_info.get('name', 'My Voicemails') }}'); return false;">
+                            <i class="bi bi-person-fill me-2"></i>
+                            My Voicemails
+                        </a>
+                    </li>
+
+                    <!-- Divider if there are groups -->
+                    {% if user_groups and user_groups|length > 0 %}
+                    <li><hr class="dropdown-divider"></li>
+                    <li><h6 class="dropdown-header">Group Mailboxes</h6></li>
+
+                    <!-- Group mailboxes -->
+                    {% for group in user_groups %}
+                    <li>
+                        <a class="dropdown-item {% if current_mailbox.type == 'group' and current_mailbox.id == group.id %}active{% endif %}"
+                           href="#"
+                           onclick="switchMailbox('group', '{{ group.id }}', '{{ group.name }}'); return false;">
+                            <i class="bi bi-people-fill me-2"></i>
+                            {{ group.name }}
+                            <small class="text-muted">({{ group.memberCount or 0 }} members)</small>
+                        </a>
+                    </li>
+                    {% endfor %}
+                    {% endif %}
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function switchMailbox(type, id, name) {
+    // Show loading indicator
+    const btn = document.getElementById('mailboxDropdown');
+    const originalText = btn.innerHTML;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Switching...';
+    btn.disabled = true;
+
+    // Make API request to switch mailbox
+    fetch('/api/switch-mailbox', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            type: type,
+            id: id,
+            name: name
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            // Reload the page to refresh voicemail list
+            window.location.reload();
+        } else {
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+            alert('Failed to switch mailbox: ' + (data.error || 'Unknown error'));
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        btn.innerHTML = originalText;
+        btn.disabled = false;
+        alert('An error occurred while switching mailbox');
+    });
+}
+</script>
+{% endif %}
