@@ -441,7 +441,8 @@ def get_user_groups(access_token, region_host):
 	# Get current user info first
 	user_info = get_user_info(access_token, region_host)
 	if not user_info:
-		return None, "Could not get user info"
+		app.logger.error("Could not get user info for fetching groups")
+		return [], None  # Return empty list instead of None
 
 	user_id = user_info.get('id')
 
@@ -463,13 +464,26 @@ def get_user_groups(access_token, region_host):
 		if error:
 			app.logger.error(f"Error fetching groups page {page_number}: {error}")
 			if page_number == 1:
-				return None, error
+				# Return empty list on error instead of None
+				return [], None
 			break
+
+		if not data:
+			app.logger.warning(f"No data returned from groups API for page {page_number}")
+			break
+
+		# Log the full response for debugging
+		app.logger.debug(f"Groups API response keys: {data.keys() if data else 'None'}")
 
 		entities = data.get('entities', [])
 		all_groups.extend(entities)
 
+		app.logger.info(f"Page {page_number}: Found {len(entities)} groups")
+
 		page_count = data.get('pageCount', 0)
+		total = data.get('total', 0)
+
+		app.logger.debug(f"Page {page_number}/{page_count}, Total groups: {total}")
 
 		if page_number >= page_count or not entities:
 			break
@@ -477,7 +491,12 @@ def get_user_groups(access_token, region_host):
 		page_number += 1
 		time.sleep(API_DELAY_GET)
 
-	app.logger.info(f"Fetched {len(all_groups)} groups where user is a member")
+	app.logger.info(f"Fetched {len(all_groups)} total groups where user is a member")
+
+	# Log group details for debugging
+	for group in all_groups:
+		app.logger.debug(f"Group: {group.get('name')} (ID: {group.get('id')}, Members: {group.get('memberCount', 0)})")
+
 	return all_groups, None
 
 # ============================================================================
@@ -933,6 +952,15 @@ def dashboard():
 		app.logger.warning(f"Error fetching groups: {groups_error}")
 		user_groups = []
 
+	# Ensure user_groups is always a list
+	if user_groups is None:
+		user_groups = []
+
+	# Debug logging
+	app.logger.info(f"Dashboard: user_groups count = {len(user_groups)}")
+	if user_groups:
+		app.logger.info(f"Dashboard: First group = {user_groups[0].get('name', 'Unknown')}")
+
 	# Get current mailbox
 	current_mailbox = get_current_mailbox()
 
@@ -1006,7 +1034,8 @@ def download_page():
 
 	# Fetch user's groups
 	user_groups, _ = get_user_groups(session.get('access_token'), session.get('region_host'))
-	if not user_groups:
+	# Ensure user_groups is always a list
+	if not user_groups or user_groups is None:
 		user_groups = []
 
 	# Get current mailbox
@@ -1128,7 +1157,8 @@ def forward_page():
 
 	# Fetch user's groups
 	user_groups, _ = get_user_groups(session.get('access_token'), session.get('region_host'))
-	if not user_groups:
+	# Ensure user_groups is always a list
+	if not user_groups or user_groups is None:
 		user_groups = []
 
 	# Get current mailbox
@@ -1159,7 +1189,8 @@ def delete_page():
 
 	# Fetch user's groups
 	user_groups, _ = get_user_groups(session.get('access_token'), session.get('region_host'))
-	if not user_groups:
+	# Ensure user_groups is always a list
+	if not user_groups or user_groups is None:
 		user_groups = []
 
 	# Get current mailbox
