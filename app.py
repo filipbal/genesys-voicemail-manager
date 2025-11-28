@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
 """
-Genesys Cloud Voicemail Manager - v17
+Genesys Cloud Voicemail Manager - v18
 ==========================================
-CHANGES FROM v16:
-- Added group voicemail inbox viewing capability
-- Users can now switch between their personal mailbox and group mailboxes
-- Mailbox selector dropdown in all pages (dashboard, download, forward, delete)
-- Session persistence for selected mailbox across page navigation
-- Support for GET /api/v2/voicemail/groups/{groupId}/messages endpoint
+CHANGES FROM v17:
+- Fixed "Fwd by: Unknown" - now correctly extracts from copiedFrom.user.name
+- Added original_date field for forwarded messages (from copiedFrom.date)
+- Improved date column semantics for source vs destination views
 """
 
 import os
@@ -612,12 +610,18 @@ def format_voicemail(vm):
 	is_forwarded = copied_from is not None
 	forwarded_by = None
 	forwarded_date = None
+	original_date = None
 	
-	if is_forwarded and caller_user:
-		# callerUser contains info about who forwarded it
-		forwarded_by = caller_user.get('name', 'Unknown')
-		# For forwarded messages, createdDate is when it was forwarded
+	if is_forwarded:
+		# copiedFrom.user contains info about who forwarded it
+		copied_from_user = copied_from.get('user', {})
+		forwarded_by = copied_from_user.get('name', 'Unknown')
+		
+		# For forwarded messages:
+		# - createdDate is when this copy was created (forward date)
+		# - copiedFrom.date is when the original was created
 		forwarded_date = created
+		original_date = copied_from.get('date')
 	
 	# Extract forwarded_to from copiedTo array (where this VM was sent)
 	copied_to = vm.get('copiedTo', [])
@@ -640,8 +644,12 @@ def format_voicemail(vm):
 		'original_caller': original_caller,
 		'caller_name': caller_name,
 		'caller_address': caller_address,
+		# For forwarded messages: original_date is when original VM was created
+		# For non-forwarded: created_date is when this VM was created
 		'created_date': format_datetime(created),
 		'created_date_raw': created,
+		'original_date': format_datetime(original_date) if original_date else None,
+		'original_date_raw': original_date,
 		'modified_date': format_datetime(modified) if modified else None,
 		'modified_date_raw': modified,
 		'duration': format_duration(vm.get('audioRecordingDurationSeconds')),
@@ -650,6 +658,7 @@ def format_voicemail(vm):
 		'is_forwarded': is_forwarded,
 		'forwarded_by': forwarded_by,
 		'forwarded_date': format_datetime(forwarded_date) if forwarded_date else None,
+		'forwarded_date_raw': forwarded_date,
 		'forwarded_to': forwarded_to,
 		'filename': format_filename(vm),
 		# Raw data for metadata export
@@ -749,6 +758,8 @@ def build_voicemail_metadata(vm, user_name):
 			'modified': vm.get('modifiedDate'),
 			'created_formatted': formatted['created_date'],
 			'modified_formatted': formatted['modified_date'],
+			'original_date': formatted['original_date_raw'],
+			'original_date_formatted': formatted['original_date'],
 		},
 		'duration_seconds': vm.get('audioRecordingDurationSeconds'),
 		'duration_formatted': formatted['duration'],
@@ -763,11 +774,11 @@ def build_voicemail_metadata(vm, user_name):
 			'forwarded_date': formatted['forwarded_date'],
 			'source_message_id': vm.get('copiedFrom', {}).get('id') if vm.get('copiedFrom') else None,
 		}
-		if formatted['raw_caller_user']:
+		if formatted['raw_copied_from'] and formatted['raw_copied_from'].get('user'):
 			metadata['forwarding']['forwarded_by_user'] = {
-				'id': formatted['raw_caller_user'].get('id'),
-				'name': formatted['raw_caller_user'].get('name'),
-				'email': formatted['raw_caller_user'].get('email'),
+				'id': formatted['raw_copied_from']['user'].get('id'),
+				'name': formatted['raw_copied_from']['user'].get('name'),
+				'email': formatted['raw_copied_from']['user'].get('email'),
 			}
 	
 	return metadata
@@ -1278,7 +1289,7 @@ def logout():
 
 @app.route('/health')
 def health():
-	return jsonify({'status': 'healthy', 'version': 'v17-group-voicemail-inbox'})
+	return jsonify({'status': 'healthy', 'version': 'v18-forwarding-fix'})
 
 @app.route('/documentation')
 def documentation():
