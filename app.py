@@ -537,34 +537,75 @@ def process_voicemails_in_batches(access_token, region_host, voicemail_ids, oper
 				if vm_err or not vm_data:
 					results['failed'] += 1
 					results['errors'].append(f"VM {vm_id[:8]}: Failed to fetch original data - {vm_err}")
-					continue
-				
-				# Extract original creation date and caller info
-				original_created = vm_data.get('createdDate')
-				original_caller_name = vm_data.get('callerName', 'Unknown')
-				
-				# Build forward body with embedded timestamp
-				url = f"https://api.{region_host}/api/v2/voicemail/messages"
-				body = {"voicemailMessageId": vm_id}
-				
-				if target_type == 'group':
-					body["groupId"] = target_id
+					app.logger.error(f"Forward FAIL: {vm_id[:8]} - could not fetch original data")
 				else:
-					body["userId"] = target_id
-				
-				# Embed original date in callerName: [YYYY-MM-DDTHH:MM:SS.sssZ] Original Caller
-				if original_created:
-					body["callerName"] = f"[{original_created}] {original_caller_name}"
-				
-				response_data, err = make_api_request(url, access_token, 'POST', body)
+					# Extract original creation date and caller info
+					original_created = vm_data.get('createdDate')
+					original_caller_name = vm_data.get('callerName', 'Unknown')
+					
+					# Build forward body with embedded timestamp
+					url = f"https://api.{region_host}/api/v2/voicemail/messages"
+					body = {"voicemailMessageId": vm_id}
+					
+					if target_type == 'group':
+						body["groupId"] = target_id
+					else:
+						body["userId"] = target_id
+					
+					# Embed original date in callerName: [YYYY-MM-DDTHH:MM:SS.sssZ] Original Caller
+					if original_created:
+						body["callerName"] = f"[{original_created}] {original_caller_name}"
+					
+					response_data, err = make_api_request(url, access_token, 'POST', body)
+					success = (err is None)
+					msg = err
+					
+					if success and response_data:
+						new_id = response_data.get('id', 'unknown')
+						app.logger.debug(f"Forward OK: {vm_id[:8]} -> new ID: {new_id[:8] if new_id != 'unknown' else 'unknown'}")
+					elif not success:
+						app.logger.error(f"Forward FAIL: {vm_id[:8]} - {msg}")
+			
+			elif operation == 'delete':
+				url = f"https://api.{region_host}/api/v2/voicemail/messages/{vm_id}"
+				_, err = make_api_request(url, access_token, 'DELETE')
 				success = (err is None)
 				msg = err
 				
-				if success and response_data:
-					new_id = response_data.get('id', 'unknown')
-					app.logger.debug(f"Forward OK: {vm_id[:8]} -> new ID: {new_id[:8] if new_id != 'unknown' else 'unknown'}")
-				elif not success:
-					app.logger.error(f"Forward FAIL: {vm_id[:8]} - {msg}")
+				if not success:
+					app.logger.error(f"Delete FAIL: {vm_id[:8]} - {msg}")
+			
+			if success:
+				results['success'] += 1
+			else:
+				results['failed'] += 1
+				results['errors'].append(f"VM {vm_id[:8]}: {msg}")
+				
+		except Exception as e:
+			results['failed'] += 1
+			results['errors'].append(f"VM {vm_id[:8]}: {str(e)}")
+			app.logger.exception(f"Exception processing {vm_id[:8]}: {e}")
+			
+		results['processed'] += 1
+		
+		if progress_id:
+			progress_data[progress_id].update({
+				'processed': results['processed'],
+				'success': results['success'],
+				'failed': results['failed']
+			})
+		
+		if (i + 1) % 50 == 0:
+			app.logger.info(f"Progress: {i+1}/{total_ids} - Success: {results['success']}, Failed: {results['failed']}")
+			
+		time.sleep(API_DELAY_WRITE)
+	
+	if progress_id:
+		progress_data[progress_id]['status'] = 'complete'
+	
+	app.logger.info(f"=== BATCH {operation.upper()} END === Total: {total_ids}, Success: {results['success']}, Failed: {results['failed']}")
+	
+	return results
 
 # ============================================================================
 # HELPERS
