@@ -96,23 +96,31 @@ batch_worker_running = False
 
 # Data Table manipulation for original timestamp storage
 def save_original_date(access_token, region_host, datatable_id, conversation_id, original_date):
-    """Write original date to data table"""
-    url = f"https://api.{region_host}/api/v2/flows/datatables/{datatable_id}/rows/{conversation_id}"
-    
-    # REVERT BACK TO "key"
-    # The error log confirms the internal property name is 'key', 
-    # and 'conversationId' is just the display title.
-    data = {
-        "key": conversation_id, 
-        "originalCreatedDate": original_date
-    }
-    
-    response, error = make_api_request(url, access_token, method='PUT', data=data)
-    
-    if error:
-        print(f"Data Table Error: {error}")
-        
-    return error is None
+	"""Write original date to data table using POST (Create)"""
+	
+	# 1. URL: Remove the conversation_id from the end
+	#    POST /api/v2/flows/datatables/{id}/rows
+	url = f"https://api.{region_host}/api/v2/flows/datatables/{datatable_id}/rows"
+
+	# 2. DATA: The 'key' field MUST be in the body
+	data = {
+		"key": conversation_id, 
+		"originalCreatedDate": original_date
+	}
+	
+	# 3. METHOD: Change to POST
+	response, error = make_api_request(url, access_token, method='POST', data=data)
+	
+	if error:
+		# Ignore "Conflict" errors (409) - it means the row already exists,
+		# which is good! We don't want to overwrite the FIRST original date.
+		if "409" in str(error) or "conflict" in str(error).lower():
+			print(f"Info: Row for {conversation_id} already exists. Skipping write.")
+			return True
+			
+		print(f"Data Table Error: {error}")
+		
+	return error is None
 
 def get_original_date(access_token, region_host, datatable_id, conversation_id):
 	"""Read original date from data table"""
