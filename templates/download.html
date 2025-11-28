@@ -64,8 +64,9 @@
                                    onchange="toggleSelectAll(this)">
                         </th>
                         <th scope="col">#</th>
-                        <th scope="col">Caller</th>
-                        <th scope="col">Phone Number</th>
+                        <th scope="col">VM ID</th>
+                        <th scope="col">Original Caller</th>
+                        <th scope="col">Forwarded To</th>
                         <th scope="col">Created</th>
                         <th scope="col">Modified</th>
                         <th scope="col">Duration</th>
@@ -78,12 +79,12 @@
                             <input type="checkbox" class="form-check-input voicemail-checkbox"
                                    value="{{ vm.id }}"
                                    data-filename="{{ vm.filename }}"
-                                   data-caller="{{ vm.caller_name }}">
+                                   data-caller="{{ vm.original_caller }}">
                         </td>
                         <td>{{ loop.index }}</td>
+                        <td><code>{{ vm.id_short }}</code></td>
                         <td>
-                            <i class="bi bi-person me-1 text-muted"></i>
-                            {{ vm.caller_name }}
+                            {{ vm.original_caller }}
                             {% if vm.is_forwarded %}
                             <br><small class="text-info">
                                 <i class="bi bi-forward-fill me-1"></i>Fwd by: {{ vm.forwarded_by or 'Unknown' }}
@@ -91,7 +92,11 @@
                             {% endif %}
                         </td>
                         <td>
-                            <code>{{ vm.caller_address or 'N/A' }}</code>
+                            {% if vm.forwarded_to %}
+                            <small class="text-success">{{ vm.forwarded_to }}</small>
+                            {% else %}
+                            <span class="text-muted">-</span>
+                            {% endif %}
                         </td>
                         <td>
                             <small>{{ vm.created_date }}</small>

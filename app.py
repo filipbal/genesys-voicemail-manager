@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 """
-Genesys Cloud Voicemail Manager - v15
+Genesys Cloud Voicemail Manager - v16
 ==========================================
-CHANGES FROM v14:
-- Added modified_date column to show forwarding time
-- Added original_caller and forwarded_by info
-- Updated filename format to include both dates
-- Enhanced metadata export with forwarding chain info
+CHANGES FROM v15:
+- Added VM ID column to dashboard/forward/delete views
+- Merged Caller and Phone Number into Original Caller column
+- Added Forwarded To column showing copiedTo targets
 """
 
 import os
@@ -428,15 +427,16 @@ def format_voicemail(vm):
 	created = vm.get('createdDate', '')
 	modified = vm.get('modifiedDate', '')
 	
-	# Determine if this is a forwarded message
+	# Determine if this is a forwarded message (received as forward)
 	copied_from = vm.get('copiedFrom')
 	caller_user = vm.get('callerUser')
 	
-	# Original caller info
-	original_caller = vm.get('callerName', 'Unknown')
-	original_caller_address = vm.get('callerAddress', '')
+	# Original caller info - use name if available, else address
+	caller_name = vm.get('callerName', '')
+	caller_address = vm.get('callerAddress', '')
+	original_caller = caller_name if caller_name else caller_address if caller_address else 'Unknown'
 	
-	# Forwarding info
+	# Forwarding info (received as forward)
 	is_forwarded = copied_from is not None
 	forwarded_by = None
 	forwarded_date = None
@@ -447,10 +447,27 @@ def format_voicemail(vm):
 		# For forwarded messages, createdDate is when it was forwarded
 		forwarded_date = created
 	
+	# Extract forwarded_to from copiedTo array (where this VM was sent)
+	copied_to = vm.get('copiedTo', [])
+	forwarded_to_list = []
+	if copied_to:
+		for copy in copied_to:
+			target_name = None
+			if copy.get('group'):
+				target_name = copy['group'].get('name')
+			elif copy.get('user'):
+				target_name = copy['user'].get('name')
+			if target_name and target_name not in forwarded_to_list:
+				forwarded_to_list.append(target_name)
+	
+	forwarded_to = ', '.join(forwarded_to_list) if forwarded_to_list else None
+	
 	return {
 		'id': vm.get('id'),
-		'caller_name': original_caller,
-		'caller_address': original_caller_address,
+		'id_short': vm.get('id', '')[:8],
+		'original_caller': original_caller,
+		'caller_name': caller_name,
+		'caller_address': caller_address,
 		'created_date': format_datetime(created),
 		'created_date_raw': created,
 		'modified_date': format_datetime(modified) if modified else None,
@@ -461,10 +478,12 @@ def format_voicemail(vm):
 		'is_forwarded': is_forwarded,
 		'forwarded_by': forwarded_by,
 		'forwarded_date': format_datetime(forwarded_date) if forwarded_date else None,
+		'forwarded_to': forwarded_to,
 		'filename': format_filename(vm),
 		# Raw data for metadata export
 		'raw_caller_user': caller_user,
 		'raw_copied_from': copied_from,
+		'raw_copied_to': copied_to,
 	}
 
 def format_filename(voicemail):
@@ -967,7 +986,7 @@ def logout():
 
 @app.route('/health')
 def health():
-	return jsonify({'status': 'healthy', 'version': 'v15-dates-forwarding'})
+	return jsonify({'status': 'healthy', 'version': 'v16-vm-id-column'})
 
 @app.route('/documentation')
 def documentation():
