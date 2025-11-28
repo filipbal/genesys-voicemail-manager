@@ -564,7 +564,7 @@ def process_voicemails_in_batches(access_token, region_host, voicemail_ids, oper
 
 					# Save original date to data table if applicable
 					if conversation_id and original_created:
-						save_original_date(access_token, region_host, DATATABLE_ID, conversation_id, original_created)
+						save_original_date(session.get('access_token'), session.get('region'), DATATABLE_ID, conversation_id, original_created)
 
 					# Build forward body with embedded timestamp
 					url = f"https://api.{region_host}/api/v2/voicemail/messages"
@@ -634,7 +634,7 @@ def process_voicemails_in_batches(access_token, region_host, voicemail_ids, oper
 # HELPERS
 # ============================================================================
 
-def format_voicemail(vm):
+def format_voicemail(vm, access_token, region_host):
 	"""Format voicemail with full date and forwarding info"""
 	created = vm.get('createdDate', '')
 	modified = vm.get('modifiedDate', '')
@@ -803,9 +803,9 @@ def cleanup_old_exports():
 	except Exception as e:
 		app.logger.error(f"Cleanup error: {e}")
 
-def build_voicemail_metadata(vm, user_name):
+def build_voicemail_metadata(vm, user_name, access_token, region_host):
 	"""Build detailed metadata for a voicemail including forwarding chain"""
-	formatted = format_voicemail(vm)
+	formatted = format_voicemail(vm, access_token, region_host)
 	
 	metadata = {
 		'id': vm.get('id'),
@@ -875,7 +875,7 @@ def process_single_batch(batch_id, voicemails, access_token, region_host, user_n
 					downloaded += 1
 					
 					# Build metadata for this voicemail
-					voicemail_metadata.append(build_voicemail_metadata(vm, user_name))
+					voicemail_metadata.append(build_voicemail_metadata(vm, user_name, access_token, region_host))
 					
 				time.sleep(DOWNLOAD_OPERATION_DELAY)
 			time.sleep(2.0)  # Batch delay
@@ -1050,7 +1050,7 @@ def dashboard():
 		flash(f"Error fetching voicemails: {error}", 'warning')
 		voicemails = []
 
-	formatted = [format_voicemail(vm) for vm in voicemails]
+	formatted = [format_voicemail(vm, token, host) for vm in voicemails]
 	preview = formatted[:20]
 
 	total_sec = sum(vm.get('audioRecordingDurationSeconds', 0) or 0 for vm in voicemails)
@@ -1124,7 +1124,7 @@ def download_page():
 	)
 	if not voicemails:
 		voicemails = []
-	formatted = [format_voicemail(vm) for vm in voicemails]
+	formatted = [format_voicemail(vm, session.get('access_token'), session.get('region_host')) for vm in voicemails]
 	return render_template('download.html',
 						 user_info=session.get('user_info'),
 						 region=REGIONS.get(session.get('region_key')),
@@ -1245,7 +1245,7 @@ def forward_page():
 		mailbox_type=current_mailbox['type'],
 		mailbox_id=current_mailbox['id']
 	)
-	formatted = [format_voicemail(vm) for vm in (voicemails or [])]
+	formatted = [format_voicemail(vm, session.get('access_token'), session.get('region_host')) for vm in (voicemails or [])]
 	return render_template('forward.html',
 						 user_info=session.get('user_info'),
 						 region=REGIONS.get(session.get('region_key')),
@@ -1277,7 +1277,7 @@ def delete_page():
 		mailbox_type=current_mailbox['type'],
 		mailbox_id=current_mailbox['id']
 	)
-	formatted = [format_voicemail(vm) for vm in (voicemails or [])]
+	formatted = [format_voicemail(vm, session.get('access_token'), session.get('region_host')) for vm in (voicemails or [])]
 	return render_template('delete.html',
 						 user_info=session.get('user_info'),
 						 region=REGIONS.get(session.get('region_key')),
