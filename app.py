@@ -529,99 +529,88 @@ def process_voicemails_in_batches(access_token, region_host, voicemail_ids, oper
         msg = ""
         
         try:
-            if operation == 'forward':
-                url = f"https://api.{region_host}/api/v2/voicemail/messages"
-                body = {"voicemailMessageId": vm_id}
-                if target_type == 'group':
-                    body["groupId"] = target_id
-                else:
-                    body["userId"] = target_id
-                
-                response_data, err = make_api_request(url, access_token, 'POST', body)
-                success = (err is None)
-                msg = err
-                
-                if success and response_data:
-                    new_id = response_data.get('id', 'unknown')
-                    app.logger.debug(f"Forward OK: {vm_id[:8]} -> new ID: {new_id[:8] if new_id != 'unknown' else 'unknown'}")
-                elif not success:
-                    app.logger.error(f"Forward FAIL: {vm_id[:8]} - {msg}")
-            
-            elif operation == 'delete':
-                url = f"https://api.{region_host}/api/v2/voicemail/messages/{vm_id}"
-                _, err = make_api_request(url, access_token, 'DELETE')
-                success = (err is None)
-                msg = err
-                
-                if not success:
-                    app.logger.error(f"Delete FAIL: {vm_id[:8]} - {msg}")
-            
-            if success:
-                results['success'] += 1
-            else:
-                results['failed'] += 1
-                results['errors'].append(f"VM {vm_id[:8]}: {msg}")
-                
-        except Exception as e:
-            results['failed'] += 1
-            results['errors'].append(f"VM {vm_id[:8]}: {str(e)}")
-            app.logger.exception(f"Exception processing {vm_id[:8]}: {e}")
-            
-        results['processed'] += 1
-        
-        if progress_id:
-            progress_data[progress_id].update({
-                'processed': results['processed'],
-                'success': results['success'],
-                'failed': results['failed']
-            })
-        
-        if (i + 1) % 50 == 0:
-            app.logger.info(f"Progress: {i+1}/{total_ids} - Success: {results['success']}, Failed: {results['failed']}")
-            
-        time.sleep(API_DELAY_WRITE)
-    
-    if progress_id:
-        progress_data[progress_id]['status'] = 'complete'
-    
-    app.logger.info(f"=== BATCH {operation.upper()} END === Total: {total_ids}, Success: {results['success']}, Failed: {results['failed']}")
-    
-    return results
+			if operation == 'forward':
+				# Fetch original voicemail details to get createdDate
+				vm_url = f"https://api.{region_host}/api/v2/voicemail/messages/{vm_id}"
+				vm_data, vm_err = make_api_request(vm_url, access_token, 'GET')
+				
+				if vm_err or not vm_data:
+					results['failed'] += 1
+					results['errors'].append(f"VM {vm_id[:8]}: Failed to fetch original data - {vm_err}")
+					continue
+				
+				# Extract original creation date and caller info
+				original_created = vm_data.get('createdDate')
+				original_caller_name = vm_data.get('callerName', 'Unknown')
+				
+				# Build forward body with embedded timestamp
+				url = f"https://api.{region_host}/api/v2/voicemail/messages"
+				body = {"voicemailMessageId": vm_id}
+				
+				if target_type == 'group':
+					body["groupId"] = target_id
+				else:
+					body["userId"] = target_id
+				
+				# Embed original date in callerName: [YYYY-MM-DDTHH:MM:SS.sssZ] Original Caller
+				if original_created:
+					body["callerName"] = f"[{original_created}] {original_caller_name}"
+				
+				response_data, err = make_api_request(url, access_token, 'POST', body)
+				success = (err is None)
+				msg = err
+				
+				if success and response_data:
+					new_id = response_data.get('id', 'unknown')
+					app.logger.debug(f"Forward OK: {vm_id[:8]} -> new ID: {new_id[:8] if new_id != 'unknown' else 'unknown'}")
+				elif not success:
+					app.logger.error(f"Forward FAIL: {vm_id[:8]} - {msg}")
 
 # ============================================================================
 # HELPERS
 # ============================================================================
 
 def format_voicemail(vm):
-	"""Format voicemail with full date and forwarding info"""
-	created = vm.get('createdDate', '')
-	modified = vm.get('modifiedDate', '')
-	
-	# Determine if this is a forwarded message (received as forward)
-	copied_from = vm.get('copiedFrom')
-	caller_user = vm.get('callerUser')
-	
-	# Original caller info - use name if available, else address
-	caller_name = vm.get('callerName', '')
-	caller_address = vm.get('callerAddress', '')
-	original_caller = caller_name if caller_name else caller_address if caller_address else 'Unknown'
-	
-	# Forwarding info (received as forward)
-	is_forwarded = copied_from is not None
-	forwarded_by = None
-	forwarded_date = None
-	original_date = None
-	
-	if is_forwarded:
-		# copiedFrom.user contains info about who forwarded it
-		copied_from_user = copied_from.get('user', {})
-		forwarded_by = copied_from_user.get('name', 'Unknown')
-		
-		# For forwarded messages:
-		# - createdDate is when this copy was created (forward date)
-		# - copiedFrom.date is when the original was created
-		forwarded_date = created
-		original_date = copied_from.get('date')
+    """Format voicemail with full date and forwarding info"""
+    created = vm.get('createdDate', '')
+    modified = vm.get('modifiedDate', '')
+    
+    # Determine if this is a forwarded message (received as forward)
+    copied_from = vm.get('copiedFrom')
+    caller_user = vm.get('callerUser')
+    
+    # Original caller info - check for embedded timestamp in callerName
+    caller_name = vm.get('callerName', '')
+    caller_address = vm.get('callerAddress', '')
+    
+    # Parse embedded original timestamp from callerName: [2022-10-20T15:21:27.166Z] Actual Name
+    embedded_date = None
+    if caller_name.startswith('[') and ']' in caller_name:
+        try:
+            end_bracket = caller_name.index(']')
+            embedded_date = caller_name[1:end_bracket].strip()
+            caller_name = caller_name[end_bracket + 1:].strip()  # Remove timestamp prefix
+        except:
+            pass
+    
+    original_caller = caller_name if caller_name else caller_address if caller_address else 'Unknown'
+    
+    # Forwarding info (received as forward)
+    is_forwarded = copied_from is not None
+    forwarded_by = None
+    forwarded_date = None
+    original_date = None
+    
+    if is_forwarded:
+        # copiedFrom.user contains info about who forwarded it
+        copied_from_user = copied_from.get('user', {})
+        forwarded_by = copied_from_user.get('name', 'Unknown')
+        
+        # For forwarded messages:
+        # - Use embedded_date if available (from our custom forward)
+        # - Otherwise fall back to copiedFrom.date
+        forwarded_date = created
+        original_date = embedded_date if embedded_date else copied_from.get('date')
 	
 	# Extract forwarded_to from copiedTo array (where this VM was sent)
 	copied_to = vm.get('copiedTo', [])
