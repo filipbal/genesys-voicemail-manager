@@ -98,8 +98,22 @@ batch_worker_running = False
 def save_original_date(access_token, region_host, datatable_id, conversation_id, original_date):
 	"""Write original date to data table"""
 	url = f"https://api.{region_host}/api/v2/flows/datatables/{datatable_id}/rows/{conversation_id}"
-	data = {"key": conversation_id, "originalCreatedDate": original_date}
-	_, error = make_api_request(url, access_token, method='PUT', data=data)
+	
+	# OLD (Incorrect): 
+	# data = {"key": conversation_id, "originalCreatedDate": original_date}
+	
+	# NEW (Correct - matches your screenshot):
+	data = {
+		"conversationId": conversation_id,  # Must match the column name in Genesys
+		"originalCreatedDate": original_date
+	}
+	
+	# Added error printing for debugging
+	response, error = make_api_request(url, access_token, method='PUT', data=data)
+	
+	if error:
+		print(f"Data Table Error: {error}") # This will help you see if there are other issues
+		
 	return error is None
 
 def get_original_date(access_token, region_host, datatable_id, conversation_id):
