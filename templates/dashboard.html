@@ -174,7 +174,10 @@
 						{% else %}
 						<td>
 							{% if vm.forwarded_to %}
-							<small class="text-success">{{ vm.forwarded_to }}</small>
+							<span class="text-success">
+								<i class="bi bi-person-check me-1"></i>
+								{{ vm.forwarded_to }}
+							</span>
 							{% else %}
 							<span class="text-muted">-</span>
 							{% endif %}
@@ -183,10 +186,10 @@
 							<small>{{ vm.created_date }}</small>
 						</td>
 						<td>
-							{% if vm.modified_date and vm.modified_date != vm.created_date %}
-							<small class="text-muted">{{ vm.modified_date }}</small>
+							{% if vm.forwarded_status_date %}
+							<small class="text-muted">{{ vm.forwarded_status_date }}</small>
 							{% else %}
-							<small class="text-muted">-</small>
+							<span class="text-muted">-</span>
 							{% endif %}
 						</td>
 						{% endif %}

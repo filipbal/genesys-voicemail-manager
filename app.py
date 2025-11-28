@@ -94,42 +94,43 @@ from queue import Queue
 batch_queue = Queue()
 batch_worker_running = False
 
-# Data Table manipulation for original timestamp storage
+# ============================================================================
+# DATA TABLE FUNCTIONS
+# ============================================================================
+
 def save_original_date(access_token, region_host, datatable_id, conversation_id, original_date):
 	"""Write original date to data table using POST (Create)"""
-	
-	# 1. URL: Remove the conversation_id from the end
-	#    POST /api/v2/flows/datatables/{id}/rows
+	# URL points to the collection, not the specific row
 	url = f"https://api.{region_host}/api/v2/flows/datatables/{datatable_id}/rows"
-
-	# 2. DATA: The 'key' field MUST be in the body
+	
+	# Payload must use 'key' for the primary key
 	data = {
 		"key": conversation_id, 
 		"originalCreatedDate": original_date
 	}
 	
-	# 3. METHOD: Change to POST
 	response, error = make_api_request(url, access_token, method='POST', data=data)
 	
 	if error:
-		# Ignore "Conflict" errors (409) - it means the row already exists,
-		# which is good! We don't want to overwrite the FIRST original date.
+		# Ignore 409 Conflict (Row already exists)
 		if "409" in str(error) or "conflict" in str(error).lower():
-			print(f"Info: Row for {conversation_id} already exists. Skipping write.")
 			return True
-			
 		print(f"Data Table Error: {error}")
 		
 	return error is None
 
 def get_original_date(access_token, region_host, datatable_id, conversation_id):
 	"""Read original date from data table"""
-	url = f"https://api.{region_host}/api/v2/flows/datatables/{datatable_id}/rows/{conversation_id}?showbrief=false"
+	if not datatable_id or not conversation_id:
+		return None
+		
+	url = f"https://api.{region_host}/api/v2/flows/datatables/{datatable_id}/rows/{conversation_id}"
 	data, error = make_api_request(url, access_token)
+	
 	if error:
 		return None
+		
 	return data.get('originalCreatedDate')
-	
 
 # ============================================================================
 # AUTHENTICATION HELPERS
@@ -662,22 +663,15 @@ def format_voicemail(vm, access_token, region_host):
 	created = vm.get('createdDate', '')
 	modified = vm.get('modifiedDate', '')
 	
-	# Determine if this is a forwarded message (received as forward)
-	copied_from = vm.get('copiedFrom')
-	caller_user = vm.get('callerUser')
-	
-	# Original caller info - check for embedded timestamp in callerName
+	# Original caller info
 	caller_name = vm.get('callerName', '')
 	caller_address = vm.get('callerAddress', '')
-
-	# Conversation ID for data table lookup
-	conversation_id = vm.get('conversation', {}).get('id')
-
-	# Parse embedded original timestamp - check both fields
+	
+	# Parse embedded original timestamp
 	embedded_date = None
 	source_field = caller_name if caller_name else caller_address
 
-	if source_field.startswith('[') and ']' in source_field:
+	if source_field and source_field.startswith('[') and ']' in source_field:
 		try:
 			end_bracket = source_field.index(']')
 			embedded_date = source_field[1:end_bracket].strip()
@@ -687,71 +681,65 @@ def format_voicemail(vm, access_token, region_host):
 
 	original_caller = caller_name if caller_name else source_field if source_field else 'Unknown'
 	
-	# Forwarding info (received as forward)
+	# Forwarding Info (Received Side)
+	copied_from = vm.get('copiedFrom')
 	is_forwarded = copied_from is not None
 	forwarded_by = None
-	forwarded_date = None
 	original_date = None
 	
+	conversation_id = vm.get('conversation', {}).get('id')
+	
 	if is_forwarded:
-		# copiedFrom.user contains info about who forwarded it
 		copied_from_user = copied_from.get('user', {})
 		forwarded_by = copied_from_user.get('name', 'Unknown')
 		
-		forwarded_date = created
-		original_date = None
-
-		# 1. Priority: Try Data Table
+		# Try Data Table first, then fallbacks
 		if conversation_id:
-			# Ensure access_token/region_host are passed to format_voicemail arguments
 			original_date = get_original_date(access_token, region_host, DATATABLE_ID, conversation_id)
-
-		# 2. Fallback: Use embedded date or standard copied date if Data Table failed
+			
 		if not original_date:
 			original_date = embedded_date if embedded_date else copied_from.get('date')
-	
-	# Extract forwarded_to from copiedTo array (where this VM was sent)
+
+	# Forwarding Info (Sent Side - LATEST ONLY)
 	copied_to = vm.get('copiedTo', [])
-	forwarded_to_list = []
+	forwarded_to_name = None
+	forwarded_status_date = None
+
 	if copied_to:
-		for copy in copied_to:
-			target_name = None
-			if copy.get('group'):
-				target_name = copy['group'].get('name')
-			elif copy.get('user'):
-				target_name = copy['user'].get('name')
-			if target_name and target_name not in forwarded_to_list:
-				forwarded_to_list.append(target_name)
-	
-	forwarded_to = ', '.join(forwarded_to_list) if forwarded_to_list else None
-	
+		# 1. Sort by date descending (Newest first)
+		copied_to.sort(key=lambda x: x.get('date', ''), reverse=True)
+		latest_forward = copied_to[0]
+
+		# 2. Extract Name
+		if latest_forward.get('group'):
+			forwarded_to_name = latest_forward['group'].get('name')
+		elif latest_forward.get('user'):
+			forwarded_to_name = latest_forward['user'].get('name')
+		
+		# 3. Extract Date
+		raw_fw_date = latest_forward.get('date')
+		if raw_fw_date:
+			forwarded_status_date = format_datetime(raw_fw_date)
+
 	return {
 		'id': vm.get('id'),
 		'id_short': vm.get('id', '')[:8],
 		'original_caller': original_caller,
 		'caller_name': caller_name,
-		'caller_address': caller_address,
-		# For forwarded messages: original_date is when original VM was created
-		# For non-forwarded: created_date is when this VM was created
 		'created_date': format_datetime(created),
 		'created_date_raw': created,
 		'original_date': format_datetime(original_date) if original_date else None,
 		'original_date_raw': original_date,
 		'modified_date': format_datetime(modified) if modified else None,
-		'modified_date_raw': modified,
 		'duration': format_duration(vm.get('audioRecordingDurationSeconds')),
 		'duration_seconds': vm.get('audioRecordingDurationSeconds'),
 		'read': vm.get('read', False),
 		'is_forwarded': is_forwarded,
 		'forwarded_by': forwarded_by,
-		'forwarded_date': format_datetime(forwarded_date) if forwarded_date else None,
-		'forwarded_date_raw': forwarded_date,
-		'forwarded_to': forwarded_to,
+		# Updated Fields for User View
+		'forwarded_to': forwarded_to_name,
+		'forwarded_status_date': forwarded_status_date,
 		'filename': format_filename(vm),
-		# Raw data for metadata export
-		'raw_caller_user': caller_user,
-		'raw_copied_from': copied_from,
-		'raw_copied_to': copied_to,
 	}
 
 def format_filename(voicemail):
