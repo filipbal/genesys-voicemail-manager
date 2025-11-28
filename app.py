@@ -124,7 +124,7 @@ def get_original_date(access_token, region_host, datatable_id, conversation_id):
 	if not datatable_id or not conversation_id:
 		return None
 		
-	url = f"https://api.{region_host}/api/v2/flows/datatables/{datatable_id}/rows/{conversation_id}"
+	url = f"https://api.{region_host}/api/v2/flows/datatables/{datatable_id}/rows/{conversation_id}?showbrief=false"
 	data, error = make_api_request(url, access_token)
 	
 	if error:
