@@ -455,36 +455,51 @@ def search_groups(access_token, region_host, query):
 	return data.get('results', []), None
 
 def get_user_groups(access_token, region_host):
-	"""
-	Fetch all groups that the current user is a member of.
-	Uses /api/v2/users/me?expand=groups to get user's groups.
-	This ensures only groups where the user is an owner/member are returned.
-	"""
-	# Use expand parameter to get groups in single request
-	url = f"https://api.{region_host}/api/v2/users/me?expand=groups"
-
-	app.logger.info("Fetching user info with groups expansion...")
-
-	data, error = make_api_request(url, access_token)
-
-	if error:
-		app.logger.error(f"Error fetching user with groups: {error}")
-		return [], None
-
-	if not data:
-		app.logger.warning("No data returned from user API")
-		return [], None
-
-	# Extract groups from the expanded response
-	groups = data.get('groups', [])
-
-	app.logger.info(f"Fetched {len(groups)} total groups where user is a member")
-
-	# Log group details for debugging
-	for group in groups:
-		app.logger.debug(f"Group: {group.get('name')} (ID: {group.get('id')}, Members: {group.get('memberCount', 0)})")
-
-	return groups, None
+    """
+    Fetch all groups that the current user is a member of.
+    """
+    url = f"https://api.{region_host}/api/v2/users/me?expand=groups"
+    
+    data, error = make_api_request(url, access_token)
+    
+    if error:
+        app.logger.error(f"Error fetching user with groups: {error}")
+        return [], None
+    
+    if not data:
+        return [], None
+    
+    # Groups only have id and selfUri - need to fetch details
+    group_refs = data.get('groups', [])
+    
+    if not group_refs:
+        return [], None
+    
+    # Fetch full details for each group
+    detailed_groups = []
+    for group_ref in group_refs:
+        group_id = group_ref.get('id')
+        if not group_id:
+            continue
+            
+        group_url = f"https://api.{region_host}/api/v2/groups/{group_id}"
+        group_data, group_error = make_api_request(group_url, access_token)
+        
+        if group_error:
+            app.logger.warning(f"Error fetching group {group_id}: {group_error}")
+            continue
+            
+        if group_data:
+            detailed_groups.append({
+                'id': group_data.get('id'),
+                'name': group_data.get('name', 'Unknown Group'),
+                'memberCount': group_data.get('memberCount', 0)
+            })
+        
+        time.sleep(0.1)  # Rate limit protection
+    
+    app.logger.info(f"Fetched details for {len(detailed_groups)} groups")
+    return detailed_groups, None
 
 # ============================================================================
 # OPERATIONS
