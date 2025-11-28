@@ -453,82 +453,82 @@ def search_groups(access_token, region_host, query):
 	return data.get('results', []), None
 
 def get_user_groups(access_token, region_host):
-    """
-    Fetch all groups that the current user is a member of.
-    """
-    url = f"https://api.{region_host}/api/v2/users/me?expand=groups"
-    
-    data, error = make_api_request(url, access_token)
-    
-    if error:
-        app.logger.error(f"Error fetching user with groups: {error}")
-        return [], None
-    
-    if not data:
-        return [], None
-    
-    # Groups only have id and selfUri - need to fetch details
-    group_refs = data.get('groups', [])
-    
-    if not group_refs:
-        return [], None
-    
-    # Fetch full details for each group
-    detailed_groups = []
-    for group_ref in group_refs:
-        group_id = group_ref.get('id')
-        if not group_id:
-            continue
-            
-        group_url = f"https://api.{region_host}/api/v2/groups/{group_id}"
-        group_data, group_error = make_api_request(group_url, access_token)
-        
-        if group_error:
-            app.logger.warning(f"Error fetching group {group_id}: {group_error}")
-            continue
-            
-        if group_data:
-            detailed_groups.append({
-                'id': group_data.get('id'),
-                'name': group_data.get('name', 'Unknown Group'),
-                'memberCount': group_data.get('memberCount', 0)
-            })
-        
-        time.sleep(0.1)  # Rate limit protection
-    
-    app.logger.info(f"Fetched details for {len(detailed_groups)} groups")
-    return detailed_groups, None
+	"""
+	Fetch all groups that the current user is a member of.
+	"""
+	url = f"https://api.{region_host}/api/v2/users/me?expand=groups"
+	
+	data, error = make_api_request(url, access_token)
+	
+	if error:
+		app.logger.error(f"Error fetching user with groups: {error}")
+		return [], None
+	
+	if not data:
+		return [], None
+	
+	# Groups only have id and selfUri - need to fetch details
+	group_refs = data.get('groups', [])
+	
+	if not group_refs:
+		return [], None
+	
+	# Fetch full details for each group
+	detailed_groups = []
+	for group_ref in group_refs:
+		group_id = group_ref.get('id')
+		if not group_id:
+			continue
+			
+		group_url = f"https://api.{region_host}/api/v2/groups/{group_id}"
+		group_data, group_error = make_api_request(group_url, access_token)
+		
+		if group_error:
+			app.logger.warning(f"Error fetching group {group_id}: {group_error}")
+			continue
+			
+		if group_data:
+			detailed_groups.append({
+				'id': group_data.get('id'),
+				'name': group_data.get('name', 'Unknown Group'),
+				'memberCount': group_data.get('memberCount', 0)
+			})
+		
+		time.sleep(0.1)  # Rate limit protection
+	
+	app.logger.info(f"Fetched details for {len(detailed_groups)} groups")
+	return detailed_groups, None
 
 # ============================================================================
 # OPERATIONS
 # ============================================================================
 
 def process_voicemails_in_batches(access_token, region_host, voicemail_ids, operation, 
-                                   target_id=None, target_type='user', progress_id=None):
-    app.logger.info(f"=== BATCH {operation.upper()} START ===")
-    app.logger.info(f"Input IDs: {len(voicemail_ids)}, Unique: {len(set(voicemail_ids))}")
-    
-    original_count = len(voicemail_ids)
-    voicemail_ids = list(dict.fromkeys(voicemail_ids))
-    if len(voicemail_ids) != original_count:
-        app.logger.warning(f"Removed {original_count - len(voicemail_ids)} duplicate IDs from input")
-    
-    results = {'success': 0, 'failed': 0, 'errors': [], 'total': len(voicemail_ids), 'processed': 0}
-    
-    total_ids = len(voicemail_ids)
-    
-    if progress_id:
-        progress_data[progress_id] = {'processed': 0, 'total': total_ids, 'success': 0, 'failed': 0, 'status': 'processing'}
-    
-    for i, vm_id in enumerate(voicemail_ids):
-        if i > 0 and i % (BATCH_SIZE * SUPER_BATCH_SIZE) == 0:
-            app.logger.info(f"Super batch break at item {i}, sleeping {SUPER_BATCH_DELAY}s...")
-            time.sleep(SUPER_BATCH_DELAY)
-        
-        success = False
-        msg = ""
-        
-        try:
+								   target_id=None, target_type='user', progress_id=None):
+	app.logger.info(f"=== BATCH {operation.upper()} START ===")
+	app.logger.info(f"Input IDs: {len(voicemail_ids)}, Unique: {len(set(voicemail_ids))}")
+	
+	original_count = len(voicemail_ids)
+	voicemail_ids = list(dict.fromkeys(voicemail_ids))
+	if len(voicemail_ids) != original_count:
+		app.logger.warning(f"Removed {original_count - len(voicemail_ids)} duplicate IDs from input")
+	
+	results = {'success': 0, 'failed': 0, 'errors': [], 'total': len(voicemail_ids), 'processed': 0}
+	
+	total_ids = len(voicemail_ids)
+	
+	if progress_id:
+		progress_data[progress_id] = {'processed': 0, 'total': total_ids, 'success': 0, 'failed': 0, 'status': 'processing'}
+	
+	for i, vm_id in enumerate(voicemail_ids):
+		if i > 0 and i % (BATCH_SIZE * SUPER_BATCH_SIZE) == 0:
+			app.logger.info(f"Super batch break at item {i}, sleeping {SUPER_BATCH_DELAY}s...")
+			time.sleep(SUPER_BATCH_DELAY)
+		
+		success = False
+		msg = ""
+		
+		try:
 			if operation == 'forward':
 				# Fetch original voicemail details to get createdDate
 				vm_url = f"https://api.{region_host}/api/v2/voicemail/messages/{vm_id}"
@@ -571,46 +571,46 @@ def process_voicemails_in_batches(access_token, region_host, voicemail_ids, oper
 # ============================================================================
 
 def format_voicemail(vm):
-    """Format voicemail with full date and forwarding info"""
-    created = vm.get('createdDate', '')
-    modified = vm.get('modifiedDate', '')
-    
-    # Determine if this is a forwarded message (received as forward)
-    copied_from = vm.get('copiedFrom')
-    caller_user = vm.get('callerUser')
-    
-    # Original caller info - check for embedded timestamp in callerName
-    caller_name = vm.get('callerName', '')
-    caller_address = vm.get('callerAddress', '')
-    
-    # Parse embedded original timestamp from callerName: [2022-10-20T15:21:27.166Z] Actual Name
-    embedded_date = None
-    if caller_name.startswith('[') and ']' in caller_name:
-        try:
-            end_bracket = caller_name.index(']')
-            embedded_date = caller_name[1:end_bracket].strip()
-            caller_name = caller_name[end_bracket + 1:].strip()  # Remove timestamp prefix
-        except:
-            pass
-    
-    original_caller = caller_name if caller_name else caller_address if caller_address else 'Unknown'
-    
-    # Forwarding info (received as forward)
-    is_forwarded = copied_from is not None
-    forwarded_by = None
-    forwarded_date = None
-    original_date = None
-    
-    if is_forwarded:
-        # copiedFrom.user contains info about who forwarded it
-        copied_from_user = copied_from.get('user', {})
-        forwarded_by = copied_from_user.get('name', 'Unknown')
-        
-        # For forwarded messages:
-        # - Use embedded_date if available (from our custom forward)
-        # - Otherwise fall back to copiedFrom.date
-        forwarded_date = created
-        original_date = embedded_date if embedded_date else copied_from.get('date')
+	"""Format voicemail with full date and forwarding info"""
+	created = vm.get('createdDate', '')
+	modified = vm.get('modifiedDate', '')
+	
+	# Determine if this is a forwarded message (received as forward)
+	copied_from = vm.get('copiedFrom')
+	caller_user = vm.get('callerUser')
+	
+	# Original caller info - check for embedded timestamp in callerName
+	caller_name = vm.get('callerName', '')
+	caller_address = vm.get('callerAddress', '')
+	
+	# Parse embedded original timestamp from callerName: [2022-10-20T15:21:27.166Z] Actual Name
+	embedded_date = None
+	if caller_name.startswith('[') and ']' in caller_name:
+		try:
+			end_bracket = caller_name.index(']')
+			embedded_date = caller_name[1:end_bracket].strip()
+			caller_name = caller_name[end_bracket + 1:].strip()  # Remove timestamp prefix
+		except:
+			pass
+	
+	original_caller = caller_name if caller_name else caller_address if caller_address else 'Unknown'
+	
+	# Forwarding info (received as forward)
+	is_forwarded = copied_from is not None
+	forwarded_by = None
+	forwarded_date = None
+	original_date = None
+	
+	if is_forwarded:
+		# copiedFrom.user contains info about who forwarded it
+		copied_from_user = copied_from.get('user', {})
+		forwarded_by = copied_from_user.get('name', 'Unknown')
+		
+		# For forwarded messages:
+		# - Use embedded_date if available (from our custom forward)
+		# - Otherwise fall back to copiedFrom.date
+		forwarded_date = created
+		original_date = embedded_date if embedded_date else copied_from.get('date')
 	
 	# Extract forwarded_to from copiedTo array (where this VM was sent)
 	copied_to = vm.get('copiedTo', [])
