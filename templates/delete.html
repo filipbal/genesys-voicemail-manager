@@ -3,7 +3,6 @@
 {% block title %}Delete Voicemails{% endblock %}
 
 {% block content %}
-<!-- User Info Banner -->
 <div class="user-info" style="background: linear-gradient(135deg, #dc3545 0%, #a71d2a 100%);">
 	<div class="row align-items-center">
 		<div class="col-md-8">
@@ -32,7 +31,6 @@
 	</div>
 </div>
 
-<!-- Warning Banner -->
 <div class="alert alert-danger mb-4">
 	<div class="d-flex align-items-center">
 		<i class="bi bi-exclamation-triangle-fill me-3 fs-3"></i>
@@ -43,7 +41,6 @@
 	</div>
 </div>
 
-<!-- Batch Processing Info -->
 <div class="alert alert-info mb-4">
 	<div class="d-flex align-items-center">
 		<i class="bi bi-info-circle-fill me-3 fs-4"></i>
@@ -54,7 +51,6 @@
 	</div>
 </div>
 
-<!-- Voicemail Selection -->
 <div class="card mb-4">
 	<div class="card-header d-flex justify-content-between align-items-center bg-danger text-white">
 		<h5 class="mb-0">
@@ -84,9 +80,15 @@
 						<th scope="col">#</th>
 						<th scope="col">VM ID</th>
 						<th scope="col">Original Caller</th>
+						{% if current_mailbox.type == 'group' %}
+						<th scope="col">Forwarded By</th>
+						<th scope="col">Original Date</th>
+						<th scope="col">Received</th>
+						{% else %}
 						<th scope="col">Forwarded To</th>
 						<th scope="col">Created</th>
-						<th scope="col">Modified</th>
+						<th scope="col">Forwarded</th>
+						{% endif %}
 						<th scope="col">Duration</th>
 					</tr>
 				</thead>
@@ -101,12 +103,23 @@
 						<td><code>{{ vm.id_short }}</code></td>
 						<td>
 							{{ vm.original_caller }}
-							{% if vm.is_forwarded %}
+							{% if current_mailbox.type != 'group' and vm.is_forwarded %}
 							<br><small class="text-info">
 								<i class="bi bi-forward-fill me-1"></i>Fwd by: {{ vm.forwarded_by or 'Unknown' }}
 							</small>
 							{% endif %}
 						</td>
+						{% if current_mailbox.type == 'group' %}
+						<td>
+							{{ vm.forwarded_by or '-' }}
+						</td>
+						<td>
+							<small>{{ vm.original_date or '-' }}</small>
+						</td>
+						<td>
+							<small>{{ vm.created_date }}</small>
+						</td>
+						{% else %}
 						<td>
 							{% if vm.forwarded_to %}
 							<small class="text-success">{{ vm.forwarded_to }}</small>
@@ -124,6 +137,7 @@
 							<small class="text-muted">-</small>
 							{% endif %}
 						</td>
+						{% endif %}
 						<td>
 							<i class="bi bi-clock me-1 text-muted"></i>
 							{{ vm.duration }}
@@ -143,7 +157,6 @@
 	</div>
 </div>
 
-<!-- Delete Button -->
 <div class="card border-danger">
 	<div class="card-body">
 		<div class="d-flex justify-content-between align-items-center">
@@ -167,7 +180,6 @@
 	</div>
 </div>
 
-<!-- Confirm Delete Modal -->
 <div class="modal fade" id="confirmDeleteModal" tabindex="-1">
 	<div class="modal-dialog">
 		<div class="modal-content">
@@ -206,7 +218,6 @@
 	</div>
 </div>
 
-<!-- Progress Modal -->
 <div class="modal fade" id="progressModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false">
 	<div class="modal-dialog modal-dialog-centered">
 		<div class="modal-content">
@@ -240,7 +251,6 @@
 	</div>
 </div>
 
-<!-- Results Modal -->
 <div class="modal fade" id="resultsModal" tabindex="-1" data-bs-backdrop="static">
 	<div class="modal-dialog">
 		<div class="modal-content">
@@ -251,8 +261,7 @@
 				</h5>
 			</div>
 			<div class="modal-body" id="resultsBody">
-				<!-- Results will be populated here -->
-			</div>
+				</div>
 			<div class="modal-footer">
 				<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
 				<a href="{{ url_for('dashboard') }}?refresh=1" class="btn btn-primary">

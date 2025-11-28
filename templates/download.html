@@ -3,191 +3,203 @@
 {% block title %}Download Voicemails{% endblock %}
 
 {% block content %}
-<!-- User Info Banner -->
 <div class="user-info" style="background: linear-gradient(135deg, #28a745 0%, #1e7e34 100%);">
-    <div class="row align-items-center">
-        <div class="col-md-8">
-            <div class="row">
-                <div class="col-lg-6">
-                    <h4 class="mb-1">
-                        <i class="bi bi-download me-2"></i>
-                        Download Voicemails
-                    </h4>
-                    <p class="mb-0 opacity-75">
-                        <i class="bi bi-person-circle me-1"></i> {{ user_info.get('name', 'User') }}
-                        <span class="mx-2">|</span>
-                        <span class="badge bg-dark">{{ region.get('name', 'Unknown Region') }}</span>
-                    </p>
-                </div>
-                <div class="col-lg-6 mt-3 mt-lg-0">
-                    {% include 'mailbox_selector.html' %}
-                </div>
-            </div>
-        </div>
-        <div class="col-md-4 text-md-end mt-3 mt-md-0">
-            <a href="{{ url_for('dashboard') }}" class="btn btn-outline-light btn-sm">
-                <i class="bi bi-arrow-left me-1"></i> Back to Dashboard
-            </a>
-        </div>
-    </div>
+	<div class="row align-items-center">
+		<div class="col-md-8">
+			<div class="row">
+				<div class="col-lg-6">
+					<h4 class="mb-1">
+						<i class="bi bi-download me-2"></i>
+						Download Voicemails
+					</h4>
+					<p class="mb-0 opacity-75">
+						<i class="bi bi-person-circle me-1"></i> {{ user_info.get('name', 'User') }}
+						<span class="mx-2">|</span>
+						<span class="badge bg-dark">{{ region.get('name', 'Unknown Region') }}</span>
+					</p>
+				</div>
+				<div class="col-lg-6 mt-3 mt-lg-0">
+					{% include 'mailbox_selector.html' %}
+				</div>
+			</div>
+		</div>
+		<div class="col-md-4 text-md-end mt-3 mt-md-0">
+			<a href="{{ url_for('dashboard') }}" class="btn btn-outline-light btn-sm">
+				<i class="bi bi-arrow-left me-1"></i> Back to Dashboard
+			</a>
+		</div>
+	</div>
 </div>
 
-<!-- Info Alert -->
 <div class="alert alert-info mb-4">
-    <div class="d-flex align-items-center">
-        <i class="bi bi-info-circle-fill me-3 fs-4"></i>
-        <div>
-            <strong>Client-Side ZIP Creation:</strong> Files are downloaded directly to your browser and zipped locally.
-            <br><small class="text-muted">No files are stored on the server. Large downloads are processed in batches to prevent timeouts.</small>
-        </div>
-    </div>
+	<div class="d-flex align-items-center">
+		<i class="bi bi-info-circle-fill me-3 fs-4"></i>
+		<div>
+			<strong>Client-Side ZIP Creation:</strong> Files are downloaded directly to your browser and zipped locally.
+			<br><small class="text-muted">No files are stored on the server. Large downloads are processed in batches to prevent timeouts.</small>
+		</div>
+	</div>
 </div>
 
-<!-- Voicemail Selection -->
 <div class="card mb-4">
-    <div class="card-header d-flex justify-content-between align-items-center bg-success text-white">
-        <h5 class="mb-0">
-            <i class="bi bi-list-check me-2"></i>
-            Select Voicemails to Download
-            <small class="ms-2">({{ voicemail_count }} total)</small>
-        </h5>
-        <div>
-            <button class="btn btn-outline-light btn-sm me-2" onclick="selectAll()">
-                <i class="bi bi-check-all me-1"></i> Select All
-            </button>
-            <button class="btn btn-outline-light btn-sm" onclick="selectNone()">
-                <i class="bi bi-x-lg me-1"></i> Clear
-            </button>
-        </div>
-    </div>
-    <div class="card-body p-0">
-        {% if voicemails %}
-        <div class="table-responsive" style="max-height: 500px; overflow-y: auto;">
-            <table class="table table-hover mb-0">
-                <thead class="table-light sticky-top">
-                    <tr>
-                        <th scope="col" style="width: 40px;">
-                            <input type="checkbox" class="form-check-input" id="selectAllCheckbox"
-                                   onchange="toggleSelectAll(this)">
-                        </th>
-                        <th scope="col">#</th>
-                        <th scope="col">VM ID</th>
-                        <th scope="col">Original Caller</th>
-                        <th scope="col">Forwarded To</th>
-                        <th scope="col">Created</th>
-                        <th scope="col">Modified</th>
-                        <th scope="col">Duration</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for vm in voicemails %}
-                    <tr class="voicemail-row">
-                        <td>
-                            <input type="checkbox" class="form-check-input voicemail-checkbox"
-                                   value="{{ vm.id }}"
-                                   data-filename="{{ vm.filename }}"
-                                   data-caller="{{ vm.original_caller }}">
-                        </td>
-                        <td>{{ loop.index }}</td>
-                        <td><code>{{ vm.id_short }}</code></td>
-                        <td>
-                            {{ vm.original_caller }}
-                            {% if vm.is_forwarded %}
-                            <br><small class="text-info">
-                                <i class="bi bi-forward-fill me-1"></i>Fwd by: {{ vm.forwarded_by or 'Unknown' }}
-                            </small>
-                            {% endif %}
-                        </td>
-                        <td>
-                            {% if vm.forwarded_to %}
-                            <small class="text-success">{{ vm.forwarded_to }}</small>
-                            {% else %}
-                            <span class="text-muted">-</span>
-                            {% endif %}
-                        </td>
-                        <td>
-                            <small>{{ vm.created_date }}</small>
-                        </td>
-                        <td>
-                            {% if vm.modified_date and vm.modified_date != vm.created_date %}
-                            <small class="text-muted">{{ vm.modified_date }}</small>
-                            {% else %}
-                            <small class="text-muted">-</small>
-                            {% endif %}
-                        </td>
-                        <td>
-                            <i class="bi bi-clock me-1 text-muted"></i>
-                            {{ vm.duration }}
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-        {% else %}
-        <div class="text-center py-5">
-            <i class="bi bi-inbox fs-1 text-muted"></i>
-            <h5 class="mt-3 text-muted">No Voicemails Found</h5>
-            <p class="text-muted">Your voicemail inbox is empty.</p>
-        </div>
-        {% endif %}
-    </div>
+	<div class="card-header d-flex justify-content-between align-items-center bg-success text-white">
+		<h5 class="mb-0">
+			<i class="bi bi-list-check me-2"></i>
+			Select Voicemails to Download
+			<small class="ms-2">({{ voicemail_count }} total)</small>
+		</h5>
+		<div>
+			<button class="btn btn-outline-light btn-sm me-2" onclick="selectAll()">
+				<i class="bi bi-check-all me-1"></i> Select All
+			</button>
+			<button class="btn btn-outline-light btn-sm" onclick="selectNone()">
+				<i class="bi bi-x-lg me-1"></i> Clear
+			</button>
+		</div>
+	</div>
+	<div class="card-body p-0">
+		{% if voicemails %}
+		<div class="table-responsive" style="max-height: 500px; overflow-y: auto;">
+			<table class="table table-hover mb-0">
+				<thead class="table-light sticky-top">
+					<tr>
+						<th scope="col" style="width: 40px;">
+							<input type="checkbox" class="form-check-input" id="selectAllCheckbox"
+								   onchange="toggleSelectAll(this)">
+						</th>
+						<th scope="col">#</th>
+						<th scope="col">VM ID</th>
+						<th scope="col">Original Caller</th>
+						{% if current_mailbox.type == 'group' %}
+						<th scope="col">Forwarded By</th>
+						<th scope="col">Original Date</th>
+						<th scope="col">Received</th>
+						{% else %}
+						<th scope="col">Forwarded To</th>
+						<th scope="col">Created</th>
+						<th scope="col">Forwarded</th>
+						{% endif %}
+						<th scope="col">Duration</th>
+					</tr>
+				</thead>
+				<tbody>
+					{% for vm in voicemails %}
+					<tr class="voicemail-row">
+						<td>
+							<input type="checkbox" class="form-check-input voicemail-checkbox"
+								   value="{{ vm.id }}"
+								   data-filename="{{ vm.filename }}"
+								   data-caller="{{ vm.original_caller }}">
+						</td>
+						<td>{{ loop.index }}</td>
+						<td><code>{{ vm.id_short }}</code></td>
+						<td>
+							{{ vm.original_caller }}
+							{% if current_mailbox.type != 'group' and vm.is_forwarded %}
+							<br><small class="text-info">
+								<i class="bi bi-forward-fill me-1"></i>Fwd by: {{ vm.forwarded_by or 'Unknown' }}
+							</small>
+							{% endif %}
+						</td>
+						{% if current_mailbox.type == 'group' %}
+						<td>
+							{{ vm.forwarded_by or '-' }}
+						</td>
+						<td>
+							<small>{{ vm.original_date or '-' }}</small>
+						</td>
+						<td>
+							<small>{{ vm.created_date }}</small>
+						</td>
+						{% else %}
+						<td>
+							{% if vm.forwarded_to %}
+							<small class="text-success">{{ vm.forwarded_to }}</small>
+							{% else %}
+							<span class="text-muted">-</span>
+							{% endif %}
+						</td>
+						<td>
+							<small>{{ vm.created_date }}</small>
+						</td>
+						<td>
+							{% if vm.modified_date and vm.modified_date != vm.created_date %}
+							<small class="text-muted">{{ vm.modified_date }}</small>
+							{% else %}
+							<small class="text-muted">-</small>
+							{% endif %}
+						</td>
+						{% endif %}
+						<td>
+							<i class="bi bi-clock me-1 text-muted"></i>
+							{{ vm.duration }}
+						</td>
+					</tr>
+					{% endfor %}
+				</tbody>
+			</table>
+		</div>
+		{% else %}
+		<div class="text-center py-5">
+			<i class="bi bi-inbox fs-1 text-muted"></i>
+			<h5 class="mt-3 text-muted">No Voicemails Found</h5>
+			<p class="text-muted">Your voicemail inbox is empty.</p>
+		</div>
+		{% endif %}
+	</div>
 </div>
 
-<!-- Download Button -->
 <div class="card">
-    <div class="card-body">
-        <div class="d-flex justify-content-between align-items-center">
-            <div>
-                <span id="selectedCount" class="text-muted">0 voicemails selected</span>
-                <span id="batchInfo" class="text-muted ms-2" style="display: none;">
-                    (will process in <span id="batchCount">0</span> batches)
-                </span>
-            </div>
-            <button type="button" class="btn btn-success btn-lg" id="downloadBtn" onclick="downloadVoicemails()" disabled>
-                <i class="bi bi-download me-2"></i>
-                Download as ZIP
-            </button>
-        </div>
-    </div>
+	<div class="card-body">
+		<div class="d-flex justify-content-between align-items-center">
+			<div>
+				<span id="selectedCount" class="text-muted">0 voicemails selected</span>
+				<span id="batchInfo" class="text-muted ms-2" style="display: none;">
+					(will process in <span id="batchCount">0</span> batches)
+				</span>
+			</div>
+			<button type="button" class="btn btn-success btn-lg" id="downloadBtn" onclick="downloadVoicemails()" disabled>
+				<i class="bi bi-download me-2"></i>
+				Download as ZIP
+			</button>
+		</div>
+	</div>
 </div>
 
-<!-- Progress Modal -->
 <div class="modal fade" id="progressModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false">
-    <div class="modal-dialog modal-dialog-centered">
-        <div class="modal-content">
-            <div class="modal-header bg-success text-white">
-                <h5 class="modal-title">
-                    <i class="bi bi-download me-2"></i>
-                    Downloading Voicemails
-                </h5>
-            </div>
-            <div class="modal-body">
-                <div class="mb-3">
-                    <div class="progress" style="height: 25px;">
-                        <div class="progress-bar progress-bar-striped progress-bar-animated bg-success"
-                             role="progressbar"
-                             id="progressBar"
-                             style="width: 0%">
-                            0%
-                        </div>
-                    </div>
-                </div>
-                <p class="text-center mb-2">
-                    <strong id="progressText">Preparing download...</strong>
-                </p>
-                <p class="text-center text-muted small mb-0" id="progressDetail">
-                    <i class="bi bi-info-circle me-1"></i>
-                    Files are being downloaded and zipped in your browser.
-                </p>
-            </div>
-        </div>
-    </div>
+	<div class="modal-dialog modal-dialog-centered">
+		<div class="modal-content">
+			<div class="modal-header bg-success text-white">
+				<h5 class="modal-title">
+					<i class="bi bi-download me-2"></i>
+					Downloading Voicemails
+				</h5>
+			</div>
+			<div class="modal-body">
+				<div class="mb-3">
+					<div class="progress" style="height: 25px;">
+						<div class="progress-bar progress-bar-striped progress-bar-animated bg-success"
+							 role="progressbar"
+							 id="progressBar"
+							 style="width: 0%">
+							0%
+						</div>
+					</div>
+				</div>
+				<p class="text-center mb-2">
+					<strong id="progressText">Preparing download...</strong>
+				</p>
+				<p class="text-center text-muted small mb-0" id="progressDetail">
+					<i class="bi bi-info-circle me-1"></i>
+					Files are being downloaded and zipped in your browser.
+				</p>
+			</div>
+		</div>
+	</div>
 </div>
 {% endblock %}
 
 {% block extra_js %}
-<!-- JSZip Library -->
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 
 <script>
@@ -203,229 +215,229 @@ let isDownloading = false;
 
 // Voicemail selection handlers
 document.querySelectorAll('.voicemail-checkbox').forEach(checkbox => {
-    checkbox.addEventListener('change', updateSelectedCount);
+	checkbox.addEventListener('change', updateSelectedCount);
 });
 
 function toggleSelectAll(checkbox) {
-    document.querySelectorAll('.voicemail-checkbox').forEach(cb => {
-        cb.checked = checkbox.checked;
-    });
-    updateSelectedCount();
+	document.querySelectorAll('.voicemail-checkbox').forEach(cb => {
+		cb.checked = checkbox.checked;
+	});
+	updateSelectedCount();
 }
 
 function selectAll() {
-    document.querySelectorAll('.voicemail-checkbox').forEach(cb => {
-        cb.checked = true;
-    });
-    document.getElementById('selectAllCheckbox').checked = true;
-    updateSelectedCount();
+	document.querySelectorAll('.voicemail-checkbox').forEach(cb => {
+		cb.checked = true;
+	});
+	document.getElementById('selectAllCheckbox').checked = true;
+	updateSelectedCount();
 }
 
 function selectNone() {
-    document.querySelectorAll('.voicemail-checkbox').forEach(cb => {
-        cb.checked = false;
-    });
-    document.getElementById('selectAllCheckbox').checked = false;
-    updateSelectedCount();
+	document.querySelectorAll('.voicemail-checkbox').forEach(cb => {
+		cb.checked = false;
+	});
+	document.getElementById('selectAllCheckbox').checked = false;
+	updateSelectedCount();
 }
 
 function updateSelectedCount() {
-    const checkboxes = document.querySelectorAll('.voicemail-checkbox:checked');
-    const count = checkboxes.length;
-    document.getElementById('selectedCount').textContent = `${count} voicemail${count !== 1 ? 's' : ''} selected`;
-    document.getElementById('downloadBtn').disabled = count === 0 || isDownloading;
+	const checkboxes = document.querySelectorAll('.voicemail-checkbox:checked');
+	const count = checkboxes.length;
+	document.getElementById('selectedCount').textContent = `${count} voicemail${count !== 1 ? 's' : ''} selected`;
+	document.getElementById('downloadBtn').disabled = count === 0 || isDownloading;
 
-    // Show batch info
-    const batchInfo = document.getElementById('batchInfo');
-    const batchCount = document.getElementById('batchCount');
+	// Show batch info
+	const batchInfo = document.getElementById('batchInfo');
+	const batchCount = document.getElementById('batchCount');
 
-    if (count > BATCH_SIZE) {
-        const batches = Math.ceil(count / BATCH_SIZE);
-        batchCount.textContent = batches;
-        batchInfo.style.display = 'inline';
-    } else {
-        batchInfo.style.display = 'none';
-    }
+	if (count > BATCH_SIZE) {
+		const batches = Math.ceil(count / BATCH_SIZE);
+		batchCount.textContent = batches;
+		batchInfo.style.display = 'inline';
+	} else {
+		batchInfo.style.display = 'none';
+	}
 
-    // Build selected voicemails list with metadata
-    selectedVoicemails = Array.from(checkboxes).map(cb => ({
-        id: cb.value,
-        filename: cb.dataset.filename,
-        caller: cb.dataset.caller
-    }));
+	// Build selected voicemails list with metadata
+	selectedVoicemails = Array.from(checkboxes).map(cb => ({
+		id: cb.value,
+		filename: cb.dataset.filename,
+		caller: cb.dataset.caller
+	}));
 }
 
 function sleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
+	return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 function updateProgress(current, total, batchNum, totalBatches, status) {
-    const percent = Math.round((current / total) * 100);
-    const progressBar = document.getElementById('progressBar');
-    const progressText = document.getElementById('progressText');
-    const progressDetail = document.getElementById('progressDetail');
+	const percent = Math.round((current / total) * 100);
+	const progressBar = document.getElementById('progressBar');
+	const progressText = document.getElementById('progressText');
+	const progressDetail = document.getElementById('progressDetail');
 
-    progressBar.style.width = `${percent}%`;
-    progressBar.textContent = `${percent}%`;
+	progressBar.style.width = `${percent}%`;
+	progressBar.textContent = `${percent}%`;
 
-    if (status === 'downloading') {
-        progressText.textContent = `Downloaded ${current} of ${total} files`;
-        if (totalBatches > 1) {
-            progressDetail.innerHTML = `<i class="bi bi-collection me-1"></i> Processing batch ${batchNum} of ${totalBatches}`;
-        } else {
-            progressDetail.innerHTML = `<i class="bi bi-hourglass-split me-1"></i> Please wait...`;
-        }
-    } else if (status === 'zipping') {
-        progressText.textContent = 'Creating ZIP file...';
-        progressDetail.innerHTML = `<i class="bi bi-file-zip me-1"></i> Compressing ${total} files`;
-    } else if (status === 'complete') {
-        progressText.textContent = 'Download complete!';
-        progressDetail.innerHTML = `<i class="bi bi-check-circle me-1"></i> Successfully downloaded ${current} files`;
-        progressBar.classList.remove('progress-bar-animated');
-    } else if (status === 'batch-break') {
-        progressDetail.innerHTML = `<i class="bi bi-pause-circle me-1"></i> Waiting between batches...`;
-    } else if (status === 'super-break') {
-        progressDetail.innerHTML = `<i class="bi bi-clock-history me-1"></i> Taking a longer break to prevent timeouts...`;
-    }
+	if (status === 'downloading') {
+		progressText.textContent = `Downloaded ${current} of ${total} files`;
+		if (totalBatches > 1) {
+			progressDetail.innerHTML = `<i class="bi bi-collection me-1"></i> Processing batch ${batchNum} of ${totalBatches}`;
+		} else {
+			progressDetail.innerHTML = `<i class="bi bi-hourglass-split me-1"></i> Please wait...`;
+		}
+	} else if (status === 'zipping') {
+		progressText.textContent = 'Creating ZIP file...';
+		progressDetail.innerHTML = `<i class="bi bi-file-zip me-1"></i> Compressing ${total} files`;
+	} else if (status === 'complete') {
+		progressText.textContent = 'Download complete!';
+		progressDetail.innerHTML = `<i class="bi bi-check-circle me-1"></i> Successfully downloaded ${current} files`;
+		progressBar.classList.remove('progress-bar-animated');
+	} else if (status === 'batch-break') {
+		progressDetail.innerHTML = `<i class="bi bi-pause-circle me-1"></i> Waiting between batches...`;
+	} else if (status === 'super-break') {
+		progressDetail.innerHTML = `<i class="bi bi-clock-history me-1"></i> Taking a longer break to prevent timeouts...`;
+	}
 }
 
 async function downloadVoicemails() {
-    const count = selectedVoicemails.length;
-    if (count === 0) {
-        alert('Please select at least one voicemail');
-        return;
-    }
+	const count = selectedVoicemails.length;
+	if (count === 0) {
+		alert('Please select at least one voicemail');
+		return;
+	}
 
-    isDownloading = true;
-    document.getElementById('downloadBtn').disabled = true;
+	isDownloading = true;
+	document.getElementById('downloadBtn').disabled = true;
 
-    // Show progress modal
-    const progressModal = new bootstrap.Modal(document.getElementById('progressModal'));
-    progressModal.show();
+	// Show progress modal
+	const progressModal = new bootstrap.Modal(document.getElementById('progressModal'));
+	progressModal.show();
 
-    // Reset progress bar
-    const progressBar = document.getElementById('progressBar');
-    progressBar.style.width = '0%';
-    progressBar.textContent = '0%';
-    progressBar.classList.add('progress-bar-animated');
+	// Reset progress bar
+	const progressBar = document.getElementById('progressBar');
+	progressBar.style.width = '0%';
+	progressBar.textContent = '0%';
+	progressBar.classList.add('progress-bar-animated');
 
-    const zip = new JSZip();
-    let downloaded = 0;
-    let errors = [];
-    const totalBatches = Math.ceil(count / BATCH_SIZE);
-    let batchesSinceSuperBreak = 0;
+	const zip = new JSZip();
+	let downloaded = 0;
+	let errors = [];
+	const totalBatches = Math.ceil(count / BATCH_SIZE);
+	let batchesSinceSuperBreak = 0;
 
-    try {
-        // Process in batches
-        for (let batchStart = 0; batchStart < count; batchStart += BATCH_SIZE) {
-            const batchEnd = Math.min(batchStart + BATCH_SIZE, count);
-            const batch = selectedVoicemails.slice(batchStart, batchEnd);
-            const batchNum = Math.floor(batchStart / BATCH_SIZE) + 1;
+	try {
+		// Process in batches
+		for (let batchStart = 0; batchStart < count; batchStart += BATCH_SIZE) {
+			const batchEnd = Math.min(batchStart + BATCH_SIZE, count);
+			const batch = selectedVoicemails.slice(batchStart, batchEnd);
+			const batchNum = Math.floor(batchStart / BATCH_SIZE) + 1;
 
-            // Super batch break
-            if (batchesSinceSuperBreak >= SUPER_BATCH_SIZE && batchNum > 1) {
-                updateProgress(downloaded, count, batchNum, totalBatches, 'super-break');
-                await sleep(SUPER_BATCH_DELAY);
-                batchesSinceSuperBreak = 0;
-            }
+			// Super batch break
+			if (batchesSinceSuperBreak >= SUPER_BATCH_SIZE && batchNum > 1) {
+				updateProgress(downloaded, count, batchNum, totalBatches, 'super-break');
+				await sleep(SUPER_BATCH_DELAY);
+				batchesSinceSuperBreak = 0;
+			}
 
-            // Download each file in batch
-            for (let i = 0; i < batch.length; i++) {
-                const vm = batch[i];
+			// Download each file in batch
+			for (let i = 0; i < batch.length; i++) {
+				const vm = batch[i];
 
-                try {
-                    updateProgress(downloaded, count, batchNum, totalBatches, 'downloading');
+				try {
+					updateProgress(downloaded, count, batchNum, totalBatches, 'downloading');
 
-                    // Fetch voicemail file
-                    const response = await fetch(`/download/${vm.id}`);
+					// Fetch voicemail file
+					const response = await fetch(`/download/${vm.id}`);
 
-                    if (!response.ok) {
-                        throw new Error(`HTTP ${response.status}`);
-                    }
+					if (!response.ok) {
+						throw new Error(`HTTP ${response.status}`);
+					}
 
-                    const blob = await response.blob();
-                    zip.file(vm.filename, blob);
-                    downloaded++;
+					const blob = await response.blob();
+					zip.file(vm.filename, blob);
+					downloaded++;
 
-                } catch (error) {
-                    console.error(`Failed to download ${vm.filename}:`, error);
-                    errors.push(`${vm.filename}: ${error.message}`);
-                }
+				} catch (error) {
+					console.error(`Failed to download ${vm.filename}:`, error);
+					errors.push(`${vm.filename}: ${error.message}`);
+				}
 
-                // Delay between files (except last in batch)
-                if (i < batch.length - 1) {
-                    await sleep(FILE_DELAY);
-                }
-            }
+				// Delay between files (except last in batch)
+				if (i < batch.length - 1) {
+					await sleep(FILE_DELAY);
+				}
+			}
 
-            batchesSinceSuperBreak++;
+			batchesSinceSuperBreak++;
 
-            // Delay between batches
-            if (batchEnd < count) {
-                updateProgress(downloaded, count, batchNum + 1, totalBatches, 'batch-break');
-                await sleep(BATCH_DELAY);
-            }
-        }
+			// Delay between batches
+			if (batchEnd < count) {
+				updateProgress(downloaded, count, batchNum + 1, totalBatches, 'batch-break');
+				await sleep(BATCH_DELAY);
+			}
+		}
 
-        // Add metadata.json
-        const metadata = {
-            exported_by: '{{ user_info.get("name", "Unknown") }}',
-            exported_at: new Date().toISOString(),
-            total_voicemails: count,
-            downloaded: downloaded,
-            errors: errors
-        };
-        zip.file('metadata.json', JSON.stringify(metadata, null, 2));
+		// Add metadata.json
+		const metadata = {
+			exported_by: '{{ user_info.get("name", "Unknown") }}',
+			exported_at: new Date().toISOString(),
+			total_voicemails: count,
+			downloaded: downloaded,
+			errors: errors
+		};
+		zip.file('metadata.json', JSON.stringify(metadata, null, 2));
 
-        // Generate ZIP
-        updateProgress(downloaded, count, totalBatches, totalBatches, 'zipping');
+		// Generate ZIP
+		updateProgress(downloaded, count, totalBatches, totalBatches, 'zipping');
 
-        const zipBlob = await zip.generateAsync({
-            type: 'blob',
-            compression: 'DEFLATE',
-            compressionOptions: { level: 6 }
-        }, (meta) => {
-            // Update progress during ZIP generation
-            const zipPercent = Math.round(meta.percent);
-            document.getElementById('progressDetail').innerHTML =
-                `<i class="bi bi-file-zip me-1"></i> Compressing... ${zipPercent}%`;
-        });
+		const zipBlob = await zip.generateAsync({
+			type: 'blob',
+			compression: 'DEFLATE',
+			compressionOptions: { level: 6 }
+		}, (meta) => {
+			// Update progress during ZIP generation
+			const zipPercent = Math.round(meta.percent);
+			document.getElementById('progressDetail').innerHTML =
+				`<i class="bi bi-file-zip me-1"></i> Compressing... ${zipPercent}%`;
+		});
 
-        // Trigger download
-        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-        const filename = `voicemails_${timestamp}.zip`;
+		// Trigger download
+		const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+		const filename = `voicemails_${timestamp}.zip`;
 
-        const url = URL.createObjectURL(zipBlob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        URL.revokeObjectURL(url);
-        document.body.removeChild(a);
+		const url = URL.createObjectURL(zipBlob);
+		const a = document.createElement('a');
+		a.href = url;
+		a.download = filename;
+		document.body.appendChild(a);
+		a.click();
+		URL.revokeObjectURL(url);
+		document.body.removeChild(a);
 
-        // Show completion
-        updateProgress(downloaded, count, totalBatches, totalBatches, 'complete');
+		// Show completion
+		updateProgress(downloaded, count, totalBatches, totalBatches, 'complete');
 
-        // Close modal after delay
-        setTimeout(() => {
-            progressModal.hide();
+		// Close modal after delay
+		setTimeout(() => {
+			progressModal.hide();
 
-            if (errors.length > 0) {
-                alert(`Downloaded ${downloaded}/${count} voicemails.\n\n${errors.length} files failed to download.`);
-            } else {
-                alert(`Successfully downloaded ${downloaded} voicemails!`);
-            }
-        }, 1500);
+			if (errors.length > 0) {
+				alert(`Downloaded ${downloaded}/${count} voicemails.\n\n${errors.length} files failed to download.`);
+			} else {
+				alert(`Successfully downloaded ${downloaded} voicemails!`);
+			}
+		}, 1500);
 
-    } catch (error) {
-        console.error('Download error:', error);
-        progressModal.hide();
-        alert('Download failed: ' + error.message);
-    } finally {
-        isDownloading = false;
-        updateSelectedCount();
-    }
+	} catch (error) {
+		console.error('Download error:', error);
+		progressModal.hide();
+		alert('Download failed: ' + error.message);
+	} finally {
+		isDownloading = false;
+		updateSelectedCount();
+	}
 }
 
 // Initialize

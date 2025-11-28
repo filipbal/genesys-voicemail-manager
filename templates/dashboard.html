@@ -3,398 +3,400 @@
 {% block title %}Dashboard{% endblock %}
 
 {% block content %}
-<!-- User Info Banner -->
 <div class="user-info">
-    <div class="row align-items-center">
-        <div class="col-md-8">
-            <div class="row">
-                <div class="col-lg-6">
-                    <h4 class="mb-1">
-                        <i class="bi bi-person-circle me-2"></i>
-                        {{ user_info.get('name', 'User') }}
-                    </h4>
-                    <p class="mb-0 opacity-75">
-                        <i class="bi bi-envelope me-1"></i> {{ user_info.get('email', 'N/A') }}
-                        <span class="mx-2">|</span>
-                        <span class="badge badge-region">{{ region.get('name', 'Unknown Region') }}</span>
-                    </p>
-                </div>
-                <div class="col-lg-6 mt-3 mt-lg-0">
-                    {% include 'mailbox_selector.html' %}
-                </div>
-            </div>
-        </div>
-        <div class="col-md-4 text-md-end mt-3 mt-md-0">
-            <a href="{{ url_for('logout') }}" class="btn btn-outline-light btn-sm">
-                <i class="bi bi-box-arrow-right me-1"></i> Logout
-            </a>
-        </div>
-    </div>
+	<div class="row align-items-center">
+		<div class="col-md-8">
+			<div class="row">
+				<div class="col-lg-6">
+					<h4 class="mb-1">
+						<i class="bi bi-person-circle me-2"></i>
+						{{ user_info.get('name', 'User') }}
+					</h4>
+					<p class="mb-0 opacity-75">
+						<i class="bi bi-envelope me-1"></i> {{ user_info.get('email', 'N/A') }}
+						<span class="mx-2">|</span>
+						<span class="badge badge-region">{{ region.get('name', 'Unknown Region') }}</span>
+					</p>
+				</div>
+				<div class="col-lg-6 mt-3 mt-lg-0">
+					{% include 'mailbox_selector.html' %}
+				</div>
+			</div>
+		</div>
+		<div class="col-md-4 text-md-end mt-3 mt-md-0">
+			<a href="{{ url_for('logout') }}" class="btn btn-outline-light btn-sm">
+				<i class="bi bi-box-arrow-right me-1"></i> Logout
+			</a>
+		</div>
+	</div>
 </div>
 
-<!-- Stats Cards - 5 Column Layout -->
 <div class="row mb-4">
-    <!-- Column 1: Voicemail Count -->
-    <div class="col-md mt-3 mt-md-0">
-        <div class="card stats-card">
-            <div class="card-body">
-                <div class="d-flex align-items-center">
-                    <div class="flex-shrink-0">
-                        <i class="bi bi-voicemail fs-1 text-muted"></i>
-                    </div>
-                    <div class="flex-grow-1 ms-3">
-                        <h2 class="mb-0">{{ voicemail_count }}</h2>
-                        <p class="text-muted mb-0">Voicemails</p>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-    
-    <!-- Column 2: Duration -->
-    <div class="col-md mt-3 mt-md-0">
-        <div class="card stats-card">
-            <div class="card-body">
-                <div class="d-flex align-items-center">
-                    <div class="flex-shrink-0">
-                        <i class="bi bi-clock-history fs-1 text-muted"></i>
-                    </div>
-                    <div class="flex-grow-1 ms-3">
-                        <h2 class="mb-0">{{ total_duration_minutes }}</h2>
-                        <p class="text-muted mb-0">Minutes</p>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-    
-    <!-- Column 3: Download All (conditional) -->
-    {% if enable_downloads %}
-    <div class="col-md mt-3 mt-md-0">
-        <div class="card stats-card">
-            <div class="card-body d-flex align-items-center justify-content-center">
-                {% if voicemail_count > 0 %}
-                <a href="{{ url_for('download_page') }}" class="btn btn-success">
-                    <i class="bi bi-download me-2"></i>
-                    Download All
-                </a>
-                {% else %}
-                <span class="text-muted">No voicemails</span>
-                {% endif %}
-            </div>
-        </div>
-    </div>
-    {% endif %}
-    
-    <!-- Column 4: Forward All -->
-    <div class="col-md mt-3 mt-md-0">
-        <div class="card stats-card">
-            <div class="card-body d-flex align-items-center justify-content-center">
-                {% if voicemail_count > 0 %}
-                <a href="{{ url_for('forward_page') }}" class="btn btn-warning">
-                    <i class="bi bi-forward me-2"></i>
-                    Forward All
-                </a>
-                {% else %}
-                <span class="text-muted">No voicemails</span>
-                {% endif %}
-            </div>
-        </div>
-    </div>
-    
-    <!-- Column 5: Delete All -->
-    <div class="col-md mt-3 mt-md-0">
-        <div class="card stats-card">
-            <div class="card-body d-flex align-items-center justify-content-center">
-                {% if voicemail_count > 0 %}
-                <a href="{{ url_for('delete_page') }}" class="btn btn-danger">
-                    <i class="bi bi-trash me-2"></i>
-                    Delete All
-                </a>
-                {% else %}
-                <span class="text-muted">No voicemails</span>
-                {% endif %}
-            </div>
-        </div>
-    </div>
+	<div class="col-md mt-3 mt-md-0">
+		<div class="card stats-card">
+			<div class="card-body">
+				<div class="d-flex align-items-center">
+					<div class="flex-shrink-0">
+						<i class="bi bi-voicemail fs-1 text-muted"></i>
+					</div>
+					<div class="flex-grow-1 ms-3">
+						<h2 class="mb-0">{{ voicemail_count }}</h2>
+						<p class="text-muted mb-0">Voicemails</p>
+					</div>
+				</div>
+			</div>
+		</div>
+	</div>
+	
+	<div class="col-md mt-3 mt-md-0">
+		<div class="card stats-card">
+			<div class="card-body">
+				<div class="d-flex align-items-center">
+					<div class="flex-shrink-0">
+						<i class="bi bi-clock-history fs-1 text-muted"></i>
+					</div>
+					<div class="flex-grow-1 ms-3">
+						<h2 class="mb-0">{{ total_duration_minutes }}</h2>
+						<p class="text-muted mb-0">Minutes</p>
+					</div>
+				</div>
+			</div>
+		</div>
+	</div>
+	
+	{% if enable_downloads %}
+	<div class="col-md mt-3 mt-md-0">
+		<div class="card stats-card">
+			<div class="card-body d-flex align-items-center justify-content-center">
+				{% if voicemail_count > 0 %}
+				<a href="{{ url_for('download_page') }}" class="btn btn-success">
+					<i class="bi bi-download me-2"></i>
+					Download All
+				</a>
+				{% else %}
+				<span class="text-muted">No voicemails</span>
+				{% endif %}
+			</div>
+		</div>
+	</div>
+	{% endif %}
+	
+	<div class="col-md mt-3 mt-md-0">
+		<div class="card stats-card">
+			<div class="card-body d-flex align-items-center justify-content-center">
+				{% if voicemail_count > 0 %}
+				<a href="{{ url_for('forward_page') }}" class="btn btn-warning">
+					<i class="bi bi-forward me-2"></i>
+					Forward All
+				</a>
+				{% else %}
+				<span class="text-muted">No voicemails</span>
+				{% endif %}
+			</div>
+		</div>
+	</div>
+	
+	<div class="col-md mt-3 mt-md-0">
+		<div class="card stats-card">
+			<div class="card-body d-flex align-items-center justify-content-center">
+				{% if voicemail_count > 0 %}
+				<a href="{{ url_for('delete_page') }}" class="btn btn-danger">
+					<i class="bi bi-trash me-2"></i>
+					Delete All
+				</a>
+				{% else %}
+				<span class="text-muted">No voicemails</span>
+				{% endif %}
+			</div>
+		</div>
+	</div>
 </div>
 
-<!-- Voicemails Table - Preview Mode -->
 <div class="card">
-    <div class="card-header d-flex justify-content-between align-items-center">
-        <h5 class="mb-0">
-            <i class="bi bi-list-ul me-2"></i>
-            Recent Voicemails
-            {% if voicemail_count > 0 %}
-            <small class="text-muted ms-2">(showing newest {{ preview_count }} of {{ voicemail_count }} total)</small>
-            {% endif %}
-        </h5>
-        <button class="btn btn-outline-secondary btn-sm" onclick="location.reload()">
-            <i class="bi bi-arrow-clockwise me-1"></i> Refresh
-        </button>
-    </div>
-    <div class="card-body p-0">
-        {% if voicemails %}
-        <div class="table-responsive">
-            <table class="table table-hover mb-0">
-                <thead class="table-light">
-                    <tr>
-                        <th scope="col">#</th>
-                        <th scope="col">VM ID</th>
-                        <th scope="col">Original Caller</th>
-                        <th scope="col">Forwarded To</th>
-                        <th scope="col">Created</th>
-                        <th scope="col">Modified</th>
-                        <th scope="col">Duration</th>
-                        <th scope="col">Status</th>
-                        <th scope="col" class="text-center">Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for vm in voicemails %}
-                    <tr class="voicemail-row {% if not vm.read %}voicemail-unread{% endif %}">
-                        <td>{{ loop.index }}</td>
-                        <td><code>{{ vm.id_short }}</code></td>
-                        <td>
-                            {{ vm.original_caller }}
-                            {% if vm.is_forwarded %}
-                            <br><small class="text-info">
-                                <i class="bi bi-forward-fill me-1"></i>Fwd by: {{ vm.forwarded_by or 'Unknown' }}
-                            </small>
-                            {% endif %}
-                        </td>
-                        <td>
-                            {% if vm.forwarded_to %}
-                            <small class="text-success">{{ vm.forwarded_to }}</small>
-                            {% else %}
-                            <span class="text-muted">-</span>
-                            {% endif %}
-                        </td>
-                        <td>
-                            <small>{{ vm.created_date }}</small>
-                        </td>
-                        <td>
-                            {% if vm.modified_date and vm.modified_date != vm.created_date %}
-                            <small class="text-muted">{{ vm.modified_date }}</small>
-                            {% else %}
-                            <small class="text-muted">-</small>
-                            {% endif %}
-                        </td>
-                        <td>
-                            <i class="bi bi-clock me-1 text-muted"></i>
-                            {{ vm.duration }}
-                        </td>
-                        <td>
-                            {% if vm.is_forwarded %}
-                            <span class="badge bg-info">Forwarded</span>
-                            {% elif vm.read %}
-                            <span class="badge bg-secondary">Read</span>
-                            {% else %}
-                            <span class="badge bg-primary">New</span>
-                            {% endif %}
-                        </td>
-                        <td class="text-center">
-                            <div class="btn-group btn-group-sm">
-                                {% if enable_downloads %}
-                                <a href="{{ url_for('download_single', message_id=vm.id) }}" 
-                                   class="btn btn-outline-success download-btn"
-                                   title="Download">
-                                    <i class="bi bi-download"></i>
-                                </a>
-                                {% endif %}
-                                <button type="button" class="btn btn-outline-warning"
-                                        data-bs-toggle="modal"
-                                        data-bs-target="#forwardModal"
-                                        data-vm-id="{{ vm.id }}"
-                                        data-vm-caller="{{ vm.original_caller }}"
-                                        title="Forward">
-                                    <i class="bi bi-forward"></i>
-                                </button>
-                                <button type="button" class="btn btn-outline-danger"
-                                        data-bs-toggle="modal" 
-                                        data-bs-target="#deleteModal"
-                                        data-vm-id="{{ vm.id }}"
-                                        data-vm-caller="{{ vm.original_caller }}"
-                                        title="Delete">
-                                    <i class="bi bi-trash"></i>
-                                </button>
-                            </div>
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-        
-        <!-- Info about viewing all voicemails -->
-        {% if voicemail_count > preview_count %}
-        <div class="card-footer bg-light">
-            <div class="text-center">
-                <p class="text-muted mb-2">
-                    <i class="bi bi-info-circle me-1"></i>
-                    This is a preview of your newest {{ preview_count }} voicemails.
-                    To see and manage all {{ voicemail_count }} voicemails, use the pages below:
-                </p>
-                <div class="btn-group">
-                    {% if enable_downloads %}
-                    <a href="{{ url_for('download_page') }}" class="btn btn-outline-success btn-sm">
-                        <i class="bi bi-download me-1"></i> Download Page
-                    </a>
-                    {% endif %}
-                    <a href="{{ url_for('forward_page') }}" class="btn btn-outline-warning btn-sm">
-                        <i class="bi bi-forward me-1"></i> Forward Page
-                    </a>
-                    <a href="{{ url_for('delete_page') }}" class="btn btn-outline-danger btn-sm">
-                        <i class="bi bi-trash me-1"></i> Delete Page
-                    </a>
-                </div>
-            </div>
-        </div>
-        {% endif %}
-        
-        {% else %}
-        <div class="text-center py-5">
-            <i class="bi bi-inbox fs-1 text-muted"></i>
-            <h5 class="mt-3 text-muted">No Voicemails Found</h5>
-            <p class="text-muted">Your voicemail inbox is empty.</p>
-        </div>
-        {% endif %}
-    </div>
+	<div class="card-header d-flex justify-content-between align-items-center">
+		<h5 class="mb-0">
+			<i class="bi bi-list-ul me-2"></i>
+			Recent Voicemails
+			{% if voicemail_count > 0 %}
+			<small class="text-muted ms-2">(showing newest {{ preview_count }} of {{ voicemail_count }} total)</small>
+			{% endif %}
+		</h5>
+		<button class="btn btn-outline-secondary btn-sm" onclick="location.reload()">
+			<i class="bi bi-arrow-clockwise me-1"></i> Refresh
+		</button>
+	</div>
+	<div class="card-body p-0">
+		{% if voicemails %}
+		<div class="table-responsive">
+			<table class="table table-hover mb-0">
+				<thead class="table-light">
+					<tr>
+						<th scope="col">#</th>
+						<th scope="col">VM ID</th>
+						<th scope="col">Original Caller</th>
+						{% if current_mailbox.type == 'group' %}
+						<th scope="col">Forwarded By</th>
+						<th scope="col">Original Date</th>
+						<th scope="col">Received</th>
+						{% else %}
+						<th scope="col">Forwarded To</th>
+						<th scope="col">Created</th>
+						<th scope="col">Forwarded</th>
+						{% endif %}
+						<th scope="col">Duration</th>
+						<th scope="col">Status</th>
+						<th scope="col" class="text-center">Actions</th>
+					</tr>
+				</thead>
+				<tbody>
+					{% for vm in voicemails %}
+					<tr class="voicemail-row {% if not vm.read %}voicemail-unread{% endif %}">
+						<td>{{ loop.index }}</td>
+						<td><code>{{ vm.id_short }}</code></td>
+						<td>
+							{{ vm.original_caller }}
+							{% if current_mailbox.type != 'group' and vm.is_forwarded %}
+							<br><small class="text-info">
+								<i class="bi bi-forward-fill me-1"></i>Fwd by: {{ vm.forwarded_by or 'Unknown' }}
+							</small>
+							{% endif %}
+						</td>
+						{% if current_mailbox.type == 'group' %}
+						<td>
+							{{ vm.forwarded_by or '-' }}
+						</td>
+						<td>
+							<small>{{ vm.original_date or '-' }}</small>
+						</td>
+						<td>
+							<small>{{ vm.created_date }}</small>
+						</td>
+						{% else %}
+						<td>
+							{% if vm.forwarded_to %}
+							<small class="text-success">{{ vm.forwarded_to }}</small>
+							{% else %}
+							<span class="text-muted">-</span>
+							{% endif %}
+						</td>
+						<td>
+							<small>{{ vm.created_date }}</small>
+						</td>
+						<td>
+							{% if vm.modified_date and vm.modified_date != vm.created_date %}
+							<small class="text-muted">{{ vm.modified_date }}</small>
+							{% else %}
+							<small class="text-muted">-</small>
+							{% endif %}
+						</td>
+						{% endif %}
+						<td>
+							<i class="bi bi-clock me-1 text-muted"></i>
+							{{ vm.duration }}
+						</td>
+						<td>
+							{% if vm.is_forwarded %}
+							<span class="badge bg-info">Forwarded</span>
+							{% elif vm.read %}
+							<span class="badge bg-secondary">Read</span>
+							{% else %}
+							<span class="badge bg-primary">New</span>
+							{% endif %}
+						</td>
+						<td class="text-center">
+							<div class="btn-group btn-group-sm">
+								{% if enable_downloads %}
+								<a href="{{ url_for('download_single', message_id=vm.id) }}" 
+								   class="btn btn-outline-success download-btn"
+								   title="Download">
+									<i class="bi bi-download"></i>
+								</a>
+								{% endif %}
+								<button type="button" class="btn btn-outline-warning"
+										data-bs-toggle="modal"
+										data-bs-target="#forwardModal"
+										data-vm-id="{{ vm.id }}"
+										data-vm-caller="{{ vm.original_caller }}"
+										title="Forward">
+									<i class="bi bi-forward"></i>
+								</button>
+								<button type="button" class="btn btn-outline-danger"
+										data-bs-toggle="modal" 
+										data-bs-target="#deleteModal"
+										data-vm-id="{{ vm.id }}"
+										data-vm-caller="{{ vm.original_caller }}"
+										title="Delete">
+									<i class="bi bi-trash"></i>
+								</button>
+							</div>
+						</td>
+					</tr>
+					{% endfor %}
+				</tbody>
+			</table>
+		</div>
+		
+		{% if voicemail_count > preview_count %}
+		<div class="card-footer bg-light">
+			<div class="text-center">
+				<p class="text-muted mb-2">
+					<i class="bi bi-info-circle me-1"></i>
+					This is a preview of your newest {{ preview_count }} voicemails.
+					To see and manage all {{ voicemail_count }} voicemails, use the pages below:
+				</p>
+				<div class="btn-group">
+					{% if enable_downloads %}
+					<a href="{{ url_for('download_page') }}" class="btn btn-outline-success btn-sm">
+						<i class="bi bi-download me-1"></i> Download Page
+					</a>
+					{% endif %}
+					<a href="{{ url_for('forward_page') }}" class="btn btn-outline-warning btn-sm">
+						<i class="bi bi-forward me-1"></i> Forward Page
+					</a>
+					<a href="{{ url_for('delete_page') }}" class="btn btn-outline-danger btn-sm">
+						<i class="bi bi-trash me-1"></i> Delete Page
+					</a>
+				</div>
+			</div>
+		</div>
+		{% endif %}
+		
+		{% else %}
+		<div class="text-center py-5">
+			<i class="bi bi-inbox fs-1 text-muted"></i>
+			<h5 class="mt-3 text-muted">No Voicemails Found</h5>
+			<p class="text-muted">Your voicemail inbox is empty.</p>
+		</div>
+		{% endif %}
+	</div>
 </div>
 
-<!-- Help Section -->
 <div class="card mt-4">
-    <div class="card-header">
-        <h5 class="mb-0">
-            <i class="bi bi-question-circle me-2"></i>
-            Quick Help
-        </h5>
-    </div>
-    <div class="card-body">
-        <div class="row">
-            {% if enable_downloads %}
-            <div class="col-md-3">
-                <h6><i class="bi bi-download me-2 text-success"></i>Download</h6>
-                <p class="small text-muted mb-3">
-                    Download voicemails as WAV audio files.
-                </p>
-            </div>
-            {% endif %}
-            <div class="col-md-{% if enable_downloads %}3{% else %}4{% endif %}">
-                <h6><i class="bi bi-forward me-2 text-warning"></i>Forward</h6>
-                <p class="small text-muted mb-3">
-                    Forward voicemails to another user.
-                </p>
-            </div>
-            <div class="col-md-{% if enable_downloads %}3{% else %}4{% endif %}">
-                <h6><i class="bi bi-trash me-2 text-danger"></i>Delete</h6>
-                <p class="small text-muted mb-3">
-                    Permanently delete voicemails.
-                </p>
-            </div>
-            <div class="col-md-{% if enable_downloads %}3{% else %}4{% endif %}">
-                <h6><i class="bi bi-info-circle me-2 text-primary"></i>Note</h6>
-                <p class="small text-muted mb-3">
-                    You can access your own voicemails and group voicemails for groups you belong to.
-                </p>
-            </div>
-        </div>
-    </div>
+	<div class="card-header">
+		<h5 class="mb-0">
+			<i class="bi bi-question-circle me-2"></i>
+			Quick Help
+		</h5>
+	</div>
+	<div class="card-body">
+		<div class="row">
+			{% if enable_downloads %}
+			<div class="col-md-3">
+				<h6><i class="bi bi-download me-2 text-success"></i>Download</h6>
+				<p class="small text-muted mb-3">
+					Download voicemails as WAV audio files.
+				</p>
+			</div>
+			{% endif %}
+			<div class="col-md-{% if enable_downloads %}3{% else %}4{% endif %}">
+				<h6><i class="bi bi-forward me-2 text-warning"></i>Forward</h6>
+				<p class="small text-muted mb-3">
+					Forward voicemails to another user.
+				</p>
+			</div>
+			<div class="col-md-{% if enable_downloads %}3{% else %}4{% endif %}">
+				<h6><i class="bi bi-trash me-2 text-danger"></i>Delete</h6>
+				<p class="small text-muted mb-3">
+					Permanently delete voicemails.
+				</p>
+			</div>
+			<div class="col-md-{% if enable_downloads %}3{% else %}4{% endif %}">
+				<h6><i class="bi bi-info-circle me-2 text-primary"></i>Note</h6>
+				<p class="small text-muted mb-3">
+					You can access your own voicemails and group voicemails for groups you belong to.
+				</p>
+			</div>
+		</div>
+	</div>
 </div>
 
-<!-- Forward Single Modal -->
 <div class="modal fade" id="forwardModal" tabindex="-1">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">
-                    <i class="bi bi-forward me-2"></i>
-                    Forward Voicemail
-                </h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body">
-                <p>Forward voicemail from: <strong id="modalCallerName"></strong></p>
-                
-                <!-- Target Type -->
-                <div class="mb-3">
-                    <label class="form-label">Forward to:</label>
-                    <div class="btn-group w-100" role="group">
-                        <input type="radio" class="btn-check" name="modalTargetType" id="modalTargetUser" value="user" checked>
-                        <label class="btn btn-outline-primary" for="modalTargetUser">
-                            <i class="bi bi-person me-1"></i> User
-                        </label>
-                        <input type="radio" class="btn-check" name="modalTargetType" id="modalTargetGroup" value="group">
-                        <label class="btn btn-outline-primary" for="modalTargetGroup">
-                            <i class="bi bi-people me-1"></i> Group
-                        </label>
-                    </div>
-                </div>
+	<div class="modal-dialog">
+		<div class="modal-content">
+			<div class="modal-header">
+				<h5 class="modal-title">
+					<i class="bi bi-forward me-2"></i>
+					Forward Voicemail
+				</h5>
+				<button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+			</div>
+			<div class="modal-body">
+				<p>Forward voicemail from: <strong id="modalCallerName"></strong></p>
+				
+				<div class="mb-3">
+					<label class="form-label">Forward to:</label>
+					<div class="btn-group w-100" role="group">
+						<input type="radio" class="btn-check" name="modalTargetType" id="modalTargetUser" value="user" checked>
+						<label class="btn btn-outline-primary" for="modalTargetUser">
+							<i class="bi bi-person me-1"></i> User
+						</label>
+						<input type="radio" class="btn-check" name="modalTargetType" id="modalTargetGroup" value="group">
+						<label class="btn btn-outline-primary" for="modalTargetGroup">
+							<i class="bi bi-people me-1"></i> Group
+						</label>
+					</div>
+				</div>
 
-                <!-- Search -->
-                <div class="mb-3">
-                    <label for="modalSearchInput" class="form-label">Search:</label>
-                    <input type="text" class="form-control" id="modalSearchInput" 
-                           placeholder="Type to search...">
-                </div>
+				<div class="mb-3">
+					<label for="modalSearchInput" class="form-label">Search:</label>
+					<input type="text" class="form-control" id="modalSearchInput" 
+						   placeholder="Type to search...">
+				</div>
 
-                <!-- Results -->
-                <div id="modalSearchResults" style="max-height: 200px; overflow-y: auto;">
-                </div>
+				<div id="modalSearchResults" style="max-height: 200px; overflow-y: auto;">
+				</div>
 
-                <!-- Selected -->
-                <div id="modalSelectedTarget" class="alert alert-success mt-3" style="display: none;">
-                    <i class="bi bi-check-circle me-2"></i>
-                    <strong>Selected:</strong> <span id="modalSelectedName"></span>
-                </div>
+				<div id="modalSelectedTarget" class="alert alert-success mt-3" style="display: none;">
+					<i class="bi bi-check-circle me-2"></i>
+					<strong>Selected:</strong> <span id="modalSelectedName"></span>
+				</div>
 
-                <input type="hidden" id="modalVoicemailId">
-                <input type="hidden" id="modalTargetId">
-                <input type="hidden" id="modalTargetName">
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                <button type="button" class="btn btn-primary" id="modalForwardBtn" onclick="forwardSingle()" disabled>
-                    <i class="bi bi-forward me-1"></i> Forward
-                </button>
-            </div>
-        </div>
-    </div>
+				<input type="hidden" id="modalVoicemailId">
+				<input type="hidden" id="modalTargetId">
+				<input type="hidden" id="modalTargetName">
+			</div>
+			<div class="modal-footer">
+				<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+				<button type="button" class="btn btn-primary" id="modalForwardBtn" onclick="forwardSingle()" disabled>
+					<i class="bi bi-forward me-1"></i> Forward
+				</button>
+			</div>
+		</div>
+	</div>
 </div>
 
-<!-- Delete Single Modal -->
 <div class="modal fade" id="deleteModal" tabindex="-1">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header bg-danger text-white">
-                <h5 class="modal-title">
-                    <i class="bi bi-exclamation-triangle me-2"></i>
-                    Delete Voicemail
-                </h5>
-                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body">
-                <div class="text-center mb-3">
-                    <i class="bi bi-trash text-danger" style="font-size: 3rem;"></i>
-                </div>
-                <p class="text-center">
-                    Are you sure you want to delete the voicemail from:<br>
-                    <strong id="deleteCallerName"></strong>?
-                </p>
-                <div class="alert alert-warning">
-                    <i class="bi bi-exclamation-triangle me-2"></i>
-                    <strong>Warning:</strong> This action cannot be undone!
-                </div>
-                <input type="hidden" id="deleteVoicemailId">
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                <button type="button" class="btn btn-danger" id="confirmDeleteBtn" onclick="deleteSingle()">
-                    <i class="bi bi-trash me-1"></i> Delete
-                </button>
-            </div>
-        </div>
-    </div>
+	<div class="modal-dialog">
+		<div class="modal-content">
+			<div class="modal-header bg-danger text-white">
+				<h5 class="modal-title">
+					<i class="bi bi-exclamation-triangle me-2"></i>
+					Delete Voicemail
+				</h5>
+				<button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+			</div>
+			<div class="modal-body">
+				<div class="text-center mb-3">
+					<i class="bi bi-trash text-danger" style="font-size: 3rem;"></i>
+				</div>
+				<p class="text-center">
+					Are you sure you want to delete the voicemail from:<br>
+					<strong id="deleteCallerName"></strong>?
+				</p>
+				<div class="alert alert-warning">
+					<i class="bi bi-exclamation-triangle me-2"></i>
+					<strong>Warning:</strong> This action cannot be undone!
+				</div>
+				<input type="hidden" id="deleteVoicemailId">
+			</div>
+			<div class="modal-footer">
+				<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+				<button type="button" class="btn btn-danger" id="confirmDeleteBtn" onclick="deleteSingle()">
+					<i class="bi bi-trash me-1"></i> Delete
+				</button>
+			</div>
+		</div>
+	</div>
 </div>
 {% endblock %}
 
@@ -402,11 +404,11 @@
 <script>
 // Download button loading state
 document.querySelectorAll('.download-btn').forEach(btn => {
-    btn.addEventListener('click', function() {
-        const originalHtml = this.innerHTML;
-        this.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
-        setTimeout(() => { this.innerHTML = originalHtml; }, 5000);
-    });
+	btn.addEventListener('click', function() {
+		const originalHtml = this.innerHTML;
+		this.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+		setTimeout(() => { this.innerHTML = originalHtml; }, 5000);
+	});
 });
 
 // Forward Modal Logic
@@ -415,210 +417,210 @@ let modalSelectedTarget = null;
 
 // Modal open handler
 document.getElementById('forwardModal').addEventListener('show.bs.modal', function(event) {
-    const button = event.relatedTarget;
-    const vmId = button.getAttribute('data-vm-id');
-    const vmCaller = button.getAttribute('data-vm-caller');
-    
-    document.getElementById('modalVoicemailId').value = vmId;
-    document.getElementById('modalCallerName').textContent = vmCaller;
-    
-    // Reset modal state
-    document.getElementById('modalSearchInput').value = '';
-    document.getElementById('modalSearchResults').innerHTML = '';
-    document.getElementById('modalSelectedTarget').style.display = 'none';
-    document.getElementById('modalForwardBtn').disabled = true;
-    modalSelectedTarget = null;
+	const button = event.relatedTarget;
+	const vmId = button.getAttribute('data-vm-id');
+	const vmCaller = button.getAttribute('data-vm-caller');
+	
+	document.getElementById('modalVoicemailId').value = vmId;
+	document.getElementById('modalCallerName').textContent = vmCaller;
+	
+	// Reset modal state
+	document.getElementById('modalSearchInput').value = '';
+	document.getElementById('modalSearchResults').innerHTML = '';
+	document.getElementById('modalSelectedTarget').style.display = 'none';
+	document.getElementById('modalForwardBtn').disabled = true;
+	modalSelectedTarget = null;
 });
 
 // Target type change
 document.querySelectorAll('input[name="modalTargetType"]').forEach(radio => {
-    radio.addEventListener('change', function() {
-        document.getElementById('modalSearchInput').value = '';
-        document.getElementById('modalSearchResults').innerHTML = '';
-        document.getElementById('modalSelectedTarget').style.display = 'none';
-        modalSelectedTarget = null;
-    });
+	radio.addEventListener('change', function() {
+		document.getElementById('modalSearchInput').value = '';
+		document.getElementById('modalSearchResults').innerHTML = '';
+		document.getElementById('modalSelectedTarget').style.display = 'none';
+		modalSelectedTarget = null;
+	});
 });
 
 // Search input
 document.getElementById('modalSearchInput').addEventListener('input', function() {
-    clearTimeout(modalSearchTimeout);
-    const query = this.value.trim();
-    
-    if (query.length < 2) {
-        document.getElementById('modalSearchResults').innerHTML = '';
-        return;
-    }
-    
-    modalSearchTimeout = setTimeout(() => {
-        const targetType = document.querySelector('input[name="modalTargetType"]:checked').value;
-        const endpoint = targetType === 'user' ? '/api/search/users' : '/api/search/groups';
-        
-        fetch(`${endpoint}?q=${encodeURIComponent(query)}`)
-            .then(response => response.json())
-            .then(data => {
-                displayModalResults(data, targetType);
-            });
-    }, 300);
+	clearTimeout(modalSearchTimeout);
+	const query = this.value.trim();
+	
+	if (query.length < 2) {
+		document.getElementById('modalSearchResults').innerHTML = '';
+		return;
+	}
+	
+	modalSearchTimeout = setTimeout(() => {
+		const targetType = document.querySelector('input[name="modalTargetType"]:checked').value;
+		const endpoint = targetType === 'user' ? '/api/search/users' : '/api/search/groups';
+		
+		fetch(`${endpoint}?q=${encodeURIComponent(query)}`)
+			.then(response => response.json())
+			.then(data => {
+				displayModalResults(data, targetType);
+			});
+	}, 300);
 });
 
 function displayModalResults(data, targetType) {
-    const resultsDiv = document.getElementById('modalSearchResults');
-    const items = targetType === 'user' ? data.users : data.groups;
-    
-    if (!items || items.length === 0) {
-        resultsDiv.innerHTML = '<div class="text-muted">No results found</div>';
-        return;
-    }
-    
-    let html = '<div class="list-group">';
-    items.forEach(item => {
-        const icon = targetType === 'user' ? 'bi-person' : 'bi-people';
-        const subtitle = targetType === 'user' ? (item.email || '') : `${item.memberCount || 0} members`;
-        
-        html += `
-            <button type="button" class="list-group-item list-group-item-action" 
-                    onclick="selectModalTarget('${item.id}', '${item.name.replace(/'/g, "\\'")}', '${targetType}')">
-                <i class="bi ${icon} me-2"></i>
-                <strong>${item.name}</strong>
-                <small class="text-muted ms-2">${subtitle}</small>
-            </button>
-        `;
-    });
-    html += '</div>';
-    
-    resultsDiv.innerHTML = html;
+	const resultsDiv = document.getElementById('modalSearchResults');
+	const items = targetType === 'user' ? data.users : data.groups;
+	
+	if (!items || items.length === 0) {
+		resultsDiv.innerHTML = '<div class="text-muted">No results found</div>';
+		return;
+	}
+	
+	let html = '<div class="list-group">';
+	items.forEach(item => {
+		const icon = targetType === 'user' ? 'bi-person' : 'bi-people';
+		const subtitle = targetType === 'user' ? (item.email || '') : `${item.memberCount || 0} members`;
+		
+		html += `
+			<button type="button" class="list-group-item list-group-item-action" 
+					onclick="selectModalTarget('${item.id}', '${item.name.replace(/'/g, "\\'")}', '${targetType}')">
+				<i class="bi ${icon} me-2"></i>
+				<strong>${item.name}</strong>
+				<small class="text-muted ms-2">${subtitle}</small>
+			</button>
+		`;
+	});
+	html += '</div>';
+	
+	resultsDiv.innerHTML = html;
 }
 
 function selectModalTarget(id, name, type) {
-    modalSelectedTarget = { id, name, type };
-    
-    document.getElementById('modalTargetId').value = id;
-    document.getElementById('modalTargetName').value = name;
-    document.getElementById('modalSelectedName').textContent = name;
-    document.getElementById('modalSelectedTarget').style.display = 'block';
-    document.getElementById('modalSearchResults').innerHTML = '';
-    document.getElementById('modalSearchInput').value = '';
-    document.getElementById('modalForwardBtn').disabled = false;
+	modalSelectedTarget = { id, name, type };
+	
+	document.getElementById('modalTargetId').value = id;
+	document.getElementById('modalTargetName').value = name;
+	document.getElementById('modalSelectedName').textContent = name;
+	document.getElementById('modalSelectedTarget').style.display = 'block';
+	document.getElementById('modalSearchResults').innerHTML = '';
+	document.getElementById('modalSearchInput').value = '';
+	document.getElementById('modalForwardBtn').disabled = false;
 }
 
 function forwardSingle() {
-    if (!modalSelectedTarget) return;
-    
-    const vmId = document.getElementById('modalVoicemailId').value;
-    const btn = document.getElementById('modalForwardBtn');
-    
-    btn.disabled = true;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Forwarding...';
-    
-    fetch('/api/forward', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            voicemail_ids: [vmId],
-            target_id: modalSelectedTarget.id,
-            target_type: modalSelectedTarget.type
-        })
-    })
-    .then(response => response.json())
-    .then(data => {
-        // Close modal
-        bootstrap.Modal.getInstance(document.getElementById('forwardModal')).hide();
-        
-        // Show result
-        if (data.success) {
-            showToast('success', `Voicemail forwarded to ${modalSelectedTarget.name}!`);
-        } else {
-            showToast('danger', `Failed to forward: ${data.errors.join(', ')}`);
-        }
-        
-        btn.disabled = false;
-        btn.innerHTML = '<i class="bi bi-forward me-1"></i> Forward';
-    })
-    .catch(error => {
-        console.error('Error:', error);
-        btn.disabled = false;
-        btn.innerHTML = '<i class="bi bi-forward me-1"></i> Forward';
-        showToast('danger', 'An error occurred');
-    });
+	if (!modalSelectedTarget) return;
+	
+	const vmId = document.getElementById('modalVoicemailId').value;
+	const btn = document.getElementById('modalForwardBtn');
+	
+	btn.disabled = true;
+	btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Forwarding...';
+	
+	fetch('/api/forward', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({
+			voicemail_ids: [vmId],
+			target_id: modalSelectedTarget.id,
+			target_type: modalSelectedTarget.type
+		})
+	})
+	.then(response => response.json())
+	.then(data => {
+		// Close modal
+		bootstrap.Modal.getInstance(document.getElementById('forwardModal')).hide();
+		
+		// Show result
+		if (data.success) {
+			showToast('success', `Voicemail forwarded to ${modalSelectedTarget.name}!`);
+		} else {
+			showToast('danger', `Failed to forward: ${data.errors.join(', ')}`);
+		}
+		
+		btn.disabled = false;
+		btn.innerHTML = '<i class="bi bi-forward me-1"></i> Forward';
+	})
+	.catch(error => {
+		console.error('Error:', error);
+		btn.disabled = false;
+		btn.innerHTML = '<i class="bi bi-forward me-1"></i> Forward';
+		showToast('danger', 'An error occurred');
+	});
 }
 
 function showToast(type, message) {
-    // Create toast container if not exists
-    let container = document.getElementById('toastContainer');
-    if (!container) {
-        container = document.createElement('div');
-        container.id = 'toastContainer';
-        container.className = 'toast-container position-fixed top-0 end-0 p-3';
-        container.style.zIndex = '1100';
-        document.body.appendChild(container);
-    }
-    
-    const toastId = 'toast-' + Date.now();
-    const toastHtml = `
-        <div id="${toastId}" class="toast align-items-center text-bg-${type}" role="alert">
-            <div class="d-flex">
-                <div class="toast-body">${message}</div>
-                <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
-            </div>
-        </div>
-    `;
-    
-    container.insertAdjacentHTML('beforeend', toastHtml);
-    
-    const toastEl = document.getElementById(toastId);
-    const toast = new bootstrap.Toast(toastEl, { delay: 5000 });
-    toast.show();
-    
-    toastEl.addEventListener('hidden.bs.toast', () => toastEl.remove());
+	// Create toast container if not exists
+	let container = document.getElementById('toastContainer');
+	if (!container) {
+		container = document.createElement('div');
+		container.id = 'toastContainer';
+		container.className = 'toast-container position-fixed top-0 end-0 p-3';
+		container.style.zIndex = '1100';
+		document.body.appendChild(container);
+	}
+	
+	const toastId = 'toast-' + Date.now();
+	const toastHtml = `
+		<div id="${toastId}" class="toast align-items-center text-bg-${type}" role="alert">
+			<div class="d-flex">
+				<div class="toast-body">${message}</div>
+				<button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+			</div>
+		</div>
+	`;
+	
+	container.insertAdjacentHTML('beforeend', toastHtml);
+	
+	const toastEl = document.getElementById(toastId);
+	const toast = new bootstrap.Toast(toastEl, { delay: 5000 });
+	toast.show();
+	
+	toastEl.addEventListener('hidden.bs.toast', () => toastEl.remove());
 }
 
 // Delete Modal Logic
 document.getElementById('deleteModal').addEventListener('show.bs.modal', function(event) {
-    const button = event.relatedTarget;
-    const vmId = button.getAttribute('data-vm-id');
-    const vmCaller = button.getAttribute('data-vm-caller');
-    
-    document.getElementById('deleteVoicemailId').value = vmId;
-    document.getElementById('deleteCallerName').textContent = vmCaller;
+	const button = event.relatedTarget;
+	const vmId = button.getAttribute('data-vm-id');
+	const vmCaller = button.getAttribute('data-vm-caller');
+	
+	document.getElementById('deleteVoicemailId').value = vmId;
+	document.getElementById('deleteCallerName').textContent = vmCaller;
 });
 
 function deleteSingle() {
-    const vmId = document.getElementById('deleteVoicemailId').value;
-    const btn = document.getElementById('confirmDeleteBtn');
-    
-    btn.disabled = true;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Deleting...';
-    
-    fetch('/api/delete', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            voicemail_ids: [vmId]
-        })
-    })
-    .then(response => response.json())
-    .then(data => {
-        // Close modal
-        bootstrap.Modal.getInstance(document.getElementById('deleteModal')).hide();
-        
-        if (data.success) {
-            showToast('success', 'Voicemail deleted successfully!');
-            // Reload page to refresh list
-            setTimeout(() => location.reload(), 1000);
-        } else {
-            showToast('danger', `Failed to delete: ${data.errors.join(', ')}`);
-        }
-        
-        btn.disabled = false;
-        btn.innerHTML = '<i class="bi bi-trash me-1"></i> Delete';
-    })
-    .catch(error => {
-        console.error('Error:', error);
-        btn.disabled = false;
-        btn.innerHTML = '<i class="bi bi-trash me-1"></i> Delete';
-        showToast('danger', 'An error occurred');
-    });
+	const vmId = document.getElementById('deleteVoicemailId').value;
+	const btn = document.getElementById('confirmDeleteBtn');
+	
+	btn.disabled = true;
+	btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Deleting...';
+	
+	fetch('/api/delete', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({
+			voicemail_ids: [vmId]
+		})
+	})
+	.then(response => response.json())
+	.then(data => {
+		// Close modal
+		bootstrap.Modal.getInstance(document.getElementById('deleteModal')).hide();
+		
+		if (data.success) {
+			showToast('success', 'Voicemail deleted successfully!');
+			// Reload page to refresh list
+			setTimeout(() => location.reload(), 1000);
+		} else {
+			showToast('danger', `Failed to delete: ${data.errors.join(', ')}`);
+		}
+		
+		btn.disabled = false;
+		btn.innerHTML = '<i class="bi bi-trash me-1"></i> Delete';
+	})
+	.catch(error => {
+		console.error('Error:', error);
+		btn.disabled = false;
+		btn.innerHTML = '<i class="bi bi-trash me-1"></i> Delete';
+		showToast('danger', 'An error occurred');
+	});
 }
 </script>
 {% endblock %}
