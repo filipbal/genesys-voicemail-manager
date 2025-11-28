@@ -622,21 +622,21 @@ def format_voicemail(vm):
 	
 	# Original caller info - check for embedded timestamp in callerName
 	caller_name = vm.get('callerName', '')
-caller_address = vm.get('callerAddress', '')
+	caller_address = vm.get('callerAddress', '')
 
-# Parse embedded original timestamp - check both fields
-embedded_date = None
-source_field = caller_name if caller_name else caller_address
+	# Parse embedded original timestamp - check both fields
+	embedded_date = None
+	source_field = caller_name if caller_name else caller_address
 
-if source_field.startswith('[') and ']' in source_field:
-	try:
-		end_bracket = source_field.index(']')
-		embedded_date = source_field[1:end_bracket].strip()
-		source_field = source_field[end_bracket + 1:].strip()
-	except:
-		pass
+	if source_field.startswith('[') and ']' in source_field:
+		try:
+			end_bracket = source_field.index(']')
+			embedded_date = source_field[1:end_bracket].strip()
+			source_field = source_field[end_bracket + 1:].strip()
+		except:
+			pass
 
-original_caller = caller_name if caller_name else source_field if source_field else 'Unknown'
+	original_caller = caller_name if caller_name else source_field if source_field else 'Unknown'
 	
 	# Forwarding info (received as forward)
 	is_forwarded = copied_from is not None
