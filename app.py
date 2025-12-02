@@ -17,10 +17,8 @@ import urllib.request
 import urllib.parse
 import tempfile
 import shutil
-import zipfile
 import time
 import threading
-import uuid
 from datetime import datetime
 from functools import wraps
 from collections import defaultdict
@@ -79,20 +77,9 @@ DOWNLOAD_BATCH_SIZE = 10
 SUPER_BATCH_SIZE = 5
 SUPER_BATCH_DELAY = 2.0
 
-DOWNLOAD_OPERATION_DELAY = 0.5
-BATCH_DOWNLOAD_SIZE = 20
-BATCH_EXPIRY_SECONDS = 3600
-
 # State management
 progress_data = {}
-prepared_batches = {}
-batch_lock = threading.Lock()
 user_operation_locks = defaultdict(threading.Lock)
-
-# Queue for batch worker
-from queue import Queue
-batch_queue = Queue()
-batch_worker_running = False
 
 # ============================================================================
 # DATA TABLE FUNCTIONS
@@ -807,161 +794,8 @@ def cleanup_old_exports():
 				os.remove(item_path)
 			elif os.path.isdir(item_path) and now - os.path.getmtime(item_path) > 3600:
 				shutil.rmtree(item_path, ignore_errors=True)
-				
-		with batch_lock:
-			expired = [bid for bid, b in prepared_batches.items() if now - b.get('created', 0) > BATCH_EXPIRY_SECONDS]
-			for bid in expired:
-				zip_path = prepared_batches[bid].get('zip_path')
-				if zip_path and os.path.exists(zip_path): os.remove(zip_path)
-				del prepared_batches[bid]
 	except Exception as e:
 		app.logger.error(f"Cleanup error: {e}")
-
-def build_voicemail_metadata(vm, user_name, access_token, region_host):
-	"""Build detailed metadata for a voicemail including forwarding chain"""
-	formatted = format_voicemail(vm, access_token, region_host)
-	
-	metadata = {
-		'id': vm.get('id'),
-		'filename': formatted['filename'],
-		'original_caller': {
-			'name': vm.get('callerName', 'Unknown'),
-			'address': vm.get('callerAddress', ''),
-		},
-		'dates': {
-			'created': vm.get('createdDate'),
-			'modified': vm.get('modifiedDate'),
-			'created_formatted': formatted['created_date'],
-			'modified_formatted': formatted['modified_date'],
-			'original_date': formatted['original_date_raw'],
-			'original_date_formatted': formatted['original_date'],
-		},
-		'duration_seconds': vm.get('audioRecordingDurationSeconds'),
-		'duration_formatted': formatted['duration'],
-		'read': vm.get('read', False),
-		'is_forwarded': formatted['is_forwarded'],
-	}
-	
-	# Add forwarding info if applicable
-	if formatted['is_forwarded']:
-		metadata['forwarding'] = {
-			'forwarded_by': formatted['forwarded_by'],
-			'forwarded_date': formatted['forwarded_date'],
-			'source_message_id': vm.get('copiedFrom', {}).get('id') if vm.get('copiedFrom') else None,
-		}
-		if formatted['raw_copied_from'] and formatted['raw_copied_from'].get('user'):
-			metadata['forwarding']['forwarded_by_user'] = {
-				'id': formatted['raw_copied_from']['user'].get('id'),
-				'name': formatted['raw_copied_from']['user'].get('name'),
-				'email': formatted['raw_copied_from']['user'].get('email'),
-			}
-	
-	return metadata
-
-# Batch Download Worker
-def process_single_batch(batch_id, voicemails, access_token, region_host, user_name, batch_num, total_batches):
-	try:
-		timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-		export_name = f"voicemails_batch{batch_num}of{total_batches}_{user_name}_{timestamp}"
-		export_dir = os.path.join(TEMP_DIR, f"{export_name}_temp")
-		os.makedirs(export_dir, exist_ok=True)
-
-		downloaded = 0
-		errors = []
-		total_items = len(voicemails)
-		voicemail_metadata = []
-
-		for batch_start in range(0, total_items, DOWNLOAD_BATCH_SIZE):
-			batch_end = min(batch_start + DOWNLOAD_BATCH_SIZE, total_items)
-			batch = voicemails[batch_start:batch_end]
-
-			for idx, vm in enumerate(batch):
-				msg_id = vm.get('id')
-				filename = format_filename(vm)
-				media_bytes, dl_error = download_voicemail_media(access_token, region_host, msg_id)
-
-				if dl_error:
-					errors.append(f"{filename}: {dl_error}")
-				else:
-					filepath = os.path.join(export_dir, filename)
-					with open(filepath, 'wb') as f:
-						f.write(media_bytes)
-					downloaded += 1
-					
-					# Build metadata for this voicemail
-					voicemail_metadata.append(build_voicemail_metadata(vm, user_name, access_token, region_host))
-					
-				time.sleep(DOWNLOAD_OPERATION_DELAY)
-			time.sleep(2.0)  # Batch delay
-
-		# Create metadata.json with enhanced info
-		metadata = {
-			'export_info': {
-				'exported_by': user_name,
-				'exported_at': datetime.now().isoformat(),
-				'batch_number': batch_num,
-				'total_batches': total_batches,
-			},
-			'summary': {
-				'total_in_batch': total_items,
-				'downloaded': downloaded,
-				'errors_count': len(errors),
-			},
-			'voicemails': voicemail_metadata,
-			'errors': errors if errors else None,
-		}
-		
-		metadata_path = os.path.join(export_dir, 'metadata.json')
-		with open(metadata_path, 'w') as f:
-			json.dump(metadata, f, indent=2)
-
-		# ZIP creation
-		zip_path = os.path.join(TEMP_DIR, f"{export_name}.zip")
-		with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-			for root, dirs, files in os.walk(export_dir):
-				for file in files:
-					file_path = os.path.join(root, file)
-					zipf.write(file_path, os.path.relpath(file_path, export_dir))
-		
-		shutil.rmtree(export_dir, ignore_errors=True)
-
-		with batch_lock:
-			if batch_id in prepared_batches:
-				prepared_batches[batch_id].update({
-					'status': 'ready',
-					'zip_path': zip_path,
-					'downloaded': downloaded,
-					'errors': len(errors)
-				})
-
-	except Exception as e:
-		with batch_lock:
-			if batch_id in prepared_batches:
-				prepared_batches[batch_id].update({'status': 'failed', 'error': str(e)})
-
-def batch_worker():
-	global batch_worker_running
-	while True:
-		try:
-			job = batch_queue.get(timeout=5)
-			if job is None: break
-			batch_id, voicemails, access_token, region_host, user_name, batch_num, total_batches = job
-			with batch_lock:
-				if batch_id in prepared_batches:
-					prepared_batches[batch_id]['status'] = 'preparing'
-			process_single_batch(batch_id, voicemails, access_token, region_host, user_name, batch_num, total_batches)
-			batch_queue.task_done()
-		except: 
-			if batch_queue.empty(): break
-	batch_worker_running = False
-
-def start_batch_worker():
-	global batch_worker_running
-	if not batch_worker_running:
-		batch_worker_running = True
-		t = threading.Thread(target=batch_worker)
-		t.daemon = True
-		t.start()
 
 # ============================================================================
 # FLASK ROUTES
@@ -1147,95 +981,6 @@ def download_page():
 						 batch_size=DOWNLOAD_BATCH_SIZE,
 						 user_groups=user_groups,
 						 current_mailbox=current_mailbox)
-
-@app.route('/download-prepare', methods=['POST'])
-@login_required
-def download_prepare():
-	schedule_keepalive()
-	data = request.get_json()
-	ids = set(data.get('voicemail_ids', []))
-
-	# Get current mailbox
-	current_mailbox = get_current_mailbox()
-
-	# Fetch voicemails for the selected mailbox
-	all_vms, _ = get_all_voicemails(
-		session.get('access_token'),
-		session.get('region_host'),
-		mailbox_type=current_mailbox['type'],
-		mailbox_id=current_mailbox['id']
-	)
-	selected = [vm for vm in all_vms if vm['id'] in ids]
-	
-	if not selected:
-		return jsonify({'success': False, 'error': 'No matching voicemails'}), 400
-	
-	user_name = session.get('user_info', {}).get('name', 'User').replace(' ', '_')
-	manifest_id = str(uuid.uuid4())
-	num_batches = (len(selected) + BATCH_DOWNLOAD_SIZE - 1) // BATCH_DOWNLOAD_SIZE
-	
-	batches_info = []
-	
-	for i in range(num_batches):
-		batch_vms = selected[i*BATCH_DOWNLOAD_SIZE : (i+1)*BATCH_DOWNLOAD_SIZE]
-		batch_id = str(uuid.uuid4())
-		
-		with batch_lock:
-			prepared_batches[batch_id] = {
-				'status': 'queued',
-				'created': time.time(),
-				'batch_num': i+1,
-				'total_batches': num_batches,
-				'total': len(batch_vms),
-				'manifest_id': manifest_id,
-				'filename': f"voicemails_batch{i+1}_{user_name}.zip"
-			}
-			batches_info.append(prepared_batches[batch_id])
-			
-		batch_queue.put((batch_id, batch_vms, session.get('access_token'), session.get('region_host'), user_name, i+1, num_batches))
-	
-	start_batch_worker()
-	
-	return jsonify({'success': True, 'manifest_id': manifest_id, 'total_voicemails': len(selected)})
-
-@app.route('/download-manifest')
-@login_required
-def download_manifest():
-	mid = request.args.get('manifest_id')
-	batches = [
-		{'id': k, **v} for k,v in prepared_batches.items() if v.get('manifest_id') == mid
-	]
-	batches.sort(key=lambda x: x['batch_num'])
-	if not batches:
-		return redirect(url_for('download_page'))
-	
-	return render_template('download_manifest.html',
-						 user_info=session.get('user_info'),
-						 region=REGIONS.get(session.get('region_key')),
-						 manifest_id=mid,
-						 batches=batches,
-						 total_voicemails=sum(b['total'] for b in batches),
-						 expiry_minutes=BATCH_EXPIRY_SECONDS // 60)
-
-@app.route('/download-batch/<batch_id>')
-@login_required
-def download_batch_file(batch_id):
-	b = prepared_batches.get(batch_id)
-	if not b or not b.get('zip_path') or not os.path.exists(b['zip_path']):
-		flash('Download expired or not found', 'danger')
-		return redirect(url_for('download_page'))
-	return send_file(b['zip_path'], as_attachment=True, download_name=b['filename'])
-
-@app.route('/api/batch-status')
-@login_required
-def api_batch_status():
-	mid = request.args.get('manifest_id')
-	batches = [{'id': k, **v} for k,v in prepared_batches.items() if v.get('manifest_id') == mid]
-	return jsonify({
-		'batches': batches,
-		'all_ready': all(b['status'] == 'ready' for b in batches),
-		'any_failed': any(b['status'] == 'failed' for b in batches)
-	})
 
 @app.route('/forward')
 @login_required
