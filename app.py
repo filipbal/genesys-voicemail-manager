@@ -884,7 +884,7 @@ def bulk_save_original_dates(access_token, region_host, datatable_id, mappings):
 	url = f"https://api.{region_host}/api/v2/flows/datatables/{datatable_id}/import/jobs"
 	
 	job_body = {
-		"importMode": "Append"  # or "ReplaceAll" if you want to replace
+		"importMode": "Append"
 	}
 	
 	job_response, error = make_api_request(url, access_token, method='POST', data=job_body)
@@ -902,11 +902,11 @@ def bulk_save_original_dates(access_token, region_host, datatable_id, mappings):
 	csv_data = "key,originalCreatedDate\n"
 	csv_data += "\n".join([f"{cid},{date}" for cid, date in mappings])
 	
-	# Step 3: Upload CSV to the uploadURI
+	# Step 3: Upload CSV to the pre-signed uploadURI
 	req = urllib.request.Request(upload_uri, method='PUT')
-	req.add_header('Authorization', f'Bearer {access_token}')
 	
-	# Add any required upload headers from the job response
+	# REMOVE Authorization header - pre-signed URL doesn't need it
+	# Only add headers from uploadHeaders response
 	for header_key, header_value in upload_headers.items():
 		req.add_header(header_key, header_value)
 	
