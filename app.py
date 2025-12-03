@@ -627,7 +627,6 @@ def process_voicemails_in_batches(access_token, region_host, voicemail_ids, oper
 
 				# Extract Data
 				original_created = vm_data.get('createdDate')
-				caller_name = vm_data.get('callerName', 'Unknown')
 				conversation_id = vm_data.get('conversation', {}).get('id')
 
 				# 1. Prepare Data Table Row
@@ -644,9 +643,7 @@ def process_voicemails_in_batches(access_token, region_host, voicemail_ids, oper
 				else:
 					body["userId"] = target_id
 				
-				# Embed original date in callerAddress
-				if original_created:
-					body["callerAddress"] = f"[{original_created}] {caller_name}"
+				# Note: callerAddress embedding removed as Genesys API ignores custom values here
 				
 				forward_payloads.append(body)
 				
