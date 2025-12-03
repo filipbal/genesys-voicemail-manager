@@ -845,10 +845,13 @@ def bulk_save_original_dates(access_token, region_host, datatable_id, date_mappi
 	
 	upload_uri = job_data.get('uploadURI')
 	upload_headers = job_data.get('uploadHeaders', {})
-	
+		
 	if not upload_uri:
 		app.logger.error("No uploadURI in job response")
 		return False
+	
+	# [CHANGE 1] Get the correct upload method from the API response
+	upload_method = job_data.get('uploadMethod', 'PUT') 
 	
 	# Step 2: Build CSV content
 	csv_lines = ["key,originalCreatedDate"]
@@ -857,8 +860,9 @@ def bulk_save_original_dates(access_token, region_host, datatable_id, date_mappi
 	csv_content = "\n".join(csv_lines)
 	
 	# Step 3: Upload file to uploadURI
-	req = urllib.request.Request(upload_uri, data=csv_content.encode('utf-8'), method='POST')
-	req.add_header('Authorization', f'Bearer {access_token}')
+	# [CHANGE 2] Use upload_method and REMOVE the Authorization header added previously
+	req = urllib.request.Request(upload_uri, data=csv_content.encode('utf-8'), method=upload_method)
+	
 	for header_key, header_val in upload_headers.items():
 		req.add_header(header_key, header_val)
 	req.add_header('Content-Type', 'text/csv')
