@@ -32,6 +32,7 @@ from flask import (
 # For bulk import
 import io
 import csv 
+import requests
 
 # ============================================================================
 # FLASK APP CONFIGURATION
@@ -844,14 +845,9 @@ def bulk_save_original_dates(access_token, region_host, datatable_id, date_mappi
 		return False
 	
 	upload_uri = job_data.get('uploadURI')
-	upload_headers = job_data.get('uploadHeaders', {})
-		
 	if not upload_uri:
 		app.logger.error("No uploadURI in job response")
 		return False
-	
-	# [CHANGE 1] Get the correct upload method from the API response
-	upload_method = job_data.get('uploadMethod', 'PUT') 
 	
 	# Step 2: Build CSV content
 	csv_lines = ["key,originalCreatedDate"]
@@ -859,26 +855,30 @@ def bulk_save_original_dates(access_token, region_host, datatable_id, date_mappi
 		csv_lines.append(f"{mapping['conversation_id']},{mapping['original_date']}")
 	csv_content = "\n".join(csv_lines)
 	
-	# Step 3: Upload file to uploadURI
-	# [CHANGE 2] Use upload_method and REMOVE the Authorization header added previously
-	req = urllib.request.Request(upload_uri, data=csv_content.encode('utf-8'), method=upload_method)
-	
-	for header_key, header_val in upload_headers.items():
-		req.add_header(header_key, header_val)
-	req.add_header('Content-Type', 'text/csv')
-	
+	# Step 3: Upload file to uploadURI using requests (Multipart POST)
 	try:
-		with urllib.request.urlopen(req, timeout=120) as response:
-			app.logger.info(f"Bulk upload successful: {len(date_mappings)} rows")
-			return True
-	except urllib.request.HTTPError as e:
-		error_body = e.read().decode() if e.fp else str(e)
-		app.logger.error(f"Bulk upload error: {e.code} - {error_body}")
-		return False
+		# The 'files' dict tells requests to send a multipart/form-data request
+		files = {
+			'file': ('import.csv', csv_content, 'text/csv')
+		}
+		
+		# Authorization is REQUIRED for the proxy endpoint
+		headers = {
+			'Authorization': f'Bearer {access_token}'
+		}
+		
+		# Perform the upload
+		response = requests.post(upload_uri, headers=headers, files=files, timeout=30)
+		response.raise_for_status() # Raises an exception for 4xx/5xx errors
+		
+		app.logger.info(f"Bulk upload successful: {len(date_mappings)} rows")
+		return True
+		
 	except Exception as e:
 		app.logger.error(f"Bulk upload error: {e}")
+		if hasattr(e, 'response') and e.response is not None:
+			app.logger.error(f"Server response: {e.response.text}")
 		return False
-
 
 # ============================================================================
 # FLASK ROUTES
