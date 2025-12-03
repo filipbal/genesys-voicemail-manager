@@ -29,7 +29,9 @@ from flask import (
 	session, flash, send_file, jsonify, Response
 )
 
-import csv # For bulk import
+# For bulk import
+import io
+import csv 
 
 # ============================================================================
 # FLASK APP CONFIGURATION
