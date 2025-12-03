@@ -70,6 +70,7 @@ API_PAGE_SIZE = 100
 # PROACTIVE DELAYS (Seconds)
 API_DELAY_GET = 1.0
 API_DELAY_WRITE = 1.0
+API_DELAY_GROUP_FETCH = 0.5  # Delay between fetching individual group details
 
 # Batch settings
 BATCH_SIZE = 20
@@ -527,7 +528,7 @@ def get_user_groups(access_token, region_host):
 				'memberCount': group_data.get('memberCount', 0)
 			})
 
-		time.sleep(0.5)  # Rate limit protection
+		time.sleep(API_DELAY_GROUP_FETCH)  # Rate limit protection
 	
 	app.logger.info(f"Fetched details for {len(detailed_groups)} groups")
 	return detailed_groups, None
