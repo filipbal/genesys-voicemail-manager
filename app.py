@@ -648,9 +648,9 @@ def process_voicemails_in_batches(access_token, region_host, voicemails_data, op
 		time.sleep(API_DELAY_WRITE)
 	
 	if operation == 'forward' and date_mappings:
-    app.logger.info(f"Bulk importing {len(date_mappings)} date mappings...")
-    import_result = bulk_save_original_dates(access_token, region_host, DATATABLE_ID, date_mappings)
-    app.logger.info(f"Import result: {import_result['success']} saved, {import_result['failed']} failed")
+		app.logger.info(f"Bulk importing {len(date_mappings)} date mappings...")
+		import_result = bulk_save_original_dates(access_token, region_host, DATATABLE_ID, date_mappings)
+		app.logger.info(f"Import result: {import_result['success']} saved, {import_result['failed']} failed")
 	
 	if progress_id:
 		progress_data[progress_id]['status'] = 'complete'
