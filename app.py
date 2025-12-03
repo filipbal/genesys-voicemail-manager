@@ -858,6 +858,7 @@ def bulk_save_original_dates(access_token, region_host, datatable_id, date_mappi
 	
 	# Step 3: Upload file to uploadURI
 	req = urllib.request.Request(upload_uri, data=csv_content.encode('utf-8'), method='POST')
+	req.add_header('Authorization', f'Bearer {access_token}')
 	for header_key, header_val in upload_headers.items():
 		req.add_header(header_key, header_val)
 	req.add_header('Content-Type', 'text/csv')
