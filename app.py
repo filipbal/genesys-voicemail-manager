@@ -904,14 +904,18 @@ def bulk_save_original_dates(access_token, region_host, datatable_id, mappings):
 	csv_data = "key,originalCreatedDate\n"
 	csv_data += "\n".join([f"{cid},{date}" for cid, date in mappings])
 	
-	# Step 3: Upload CSV - try POST instead of PUT
+	# Step 3: Upload CSV
 	req = urllib.request.Request(upload_uri, method='POST')
 	
-	# Add headers from response
+	# Add headers from response first
 	for header_key, header_value in upload_headers.items():
 		req.add_header(header_key, header_value)
 	
-	# Set Content-Type if not already in uploadHeaders
+	# Add Authorization if not in uploadHeaders
+	if 'Authorization' not in upload_headers:
+		req.add_header('Authorization', f'Bearer {access_token}')
+	
+	# Set Content-Type if not already set
 	if 'Content-Type' not in upload_headers:
 		req.add_header('Content-Type', 'text/csv')
 	
