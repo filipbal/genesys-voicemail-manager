@@ -648,8 +648,9 @@ def process_voicemails_in_batches(access_token, region_host, voicemails_data, op
 		time.sleep(API_DELAY_WRITE)
 	
 	if operation == 'forward' and date_mappings:
-		app.logger.info(f"Bulk saving {len(date_mappings)} date mappings...")
-		bulk_save_original_dates(access_token, region_host, DATATABLE_ID, date_mappings)
+    app.logger.info(f"Bulk importing {len(date_mappings)} date mappings...")
+    import_result = bulk_save_original_dates(access_token, region_host, DATATABLE_ID, date_mappings)
+    app.logger.info(f"Import result: {import_result['success']} saved, {import_result['failed']} failed")
 	
 	if progress_id:
 		progress_data[progress_id]['status'] = 'complete'
@@ -828,57 +829,78 @@ def cleanup_old_exports():
 # ============================================================================
 
 def bulk_save_original_dates(access_token, region_host, datatable_id, date_mappings):
-	"""
-	Bulk save original dates using import job.
-	date_mappings: list of {"conversation_id": "...", "original_date": "..."}
-	"""
-	if not date_mappings or not datatable_id:
-		return True
-	
-	# Step 1: Create import job
-	job_url = f"https://api.{region_host}/api/v2/flows/datatables/{datatable_id}/import/jobs"
-	job_body = {"importMode": "Append"}
-	
-	job_data, error = make_api_request(job_url, access_token, method='POST', data=job_body)
-	if error:
-		app.logger.error(f"Failed to create import job: {error}")
-		return False
-	
-	upload_uri = job_data.get('uploadURI')
-	if not upload_uri:
-		app.logger.error("No uploadURI in job response")
-		return False
-	
-	# Step 2: Build CSV content
-	csv_lines = ["key,originalCreatedDate"]
-	for mapping in date_mappings:
-		csv_lines.append(f"{mapping['conversation_id']},{mapping['original_date']}")
-	csv_content = "\n".join(csv_lines)
-	
-	# Step 3: Upload file to uploadURI using requests (Multipart POST)
-	try:
-		# The 'files' dict tells requests to send a multipart/form-data request
-		files = {
-			'file': ('import.csv', csv_content, 'text/csv')
-		}
-		
-		# Authorization is REQUIRED for the proxy endpoint
-		headers = {
-			'Authorization': f'Bearer {access_token}'
-		}
-		
-		# Perform the upload
-		response = requests.post(upload_uri, headers=headers, files=files, timeout=30)
-		response.raise_for_status() # Raises an exception for 4xx/5xx errors
-		
-		app.logger.info(f"Bulk upload successful: {len(date_mappings)} rows")
-		return True
-		
-	except Exception as e:
-		app.logger.error(f"Bulk upload error: {e}")
-		if hasattr(e, 'response') and e.response is not None:
-			app.logger.error(f"Server response: {e.response.text}")
-		return False
+    """
+    Bulk save original dates using import job.
+    date_mappings: list of {"conversation_id": "...", "original_date": "..."}
+    Returns: dict with success, failed, job_id, errors
+    """
+    if not date_mappings or not datatable_id:
+        return {'success': 0, 'failed': 0, 'job_id': None, 'errors': []}
+    
+    result = {'success': 0, 'failed': len(date_mappings), 'job_id': None, 'errors': []}
+    
+    # Step 1: Create import job
+    job_url = f"https://api.{region_host}/api/v2/flows/datatables/{datatable_id}/import/jobs"
+    job_body = {"importMode": "Append"}
+    
+    job_data, error = make_api_request(job_url, access_token, method='POST', data=job_body)
+    if error:
+        result['errors'].append(f"Failed to create job: {error}")
+        return result
+    
+    job_id = job_data.get('id')
+    upload_uri = job_data.get('uploadURI')
+    upload_headers = job_data.get('uploadHeaders', {})
+    
+    if not upload_uri or not job_id:
+        result['errors'].append("Missing uploadURI or job ID")
+        return result
+    
+    result['job_id'] = job_id
+    
+    # Step 2: Build CSV
+    csv_buffer = io.StringIO()
+    writer = csv.writer(csv_buffer)
+    writer.writerow(['key', 'originalCreatedDate'])
+    for mapping in date_mappings:
+        writer.writerow([mapping['conversation_id'], mapping['original_date']])
+    csv_content = csv_buffer.getvalue().encode('utf-8')
+    
+    # Step 3: Upload CSV via PUT
+    try:
+        headers = dict(upload_headers)
+        headers['Content-Type'] = 'text/csv'
+        
+        upload_resp = requests.put(upload_uri, data=csv_content, headers=headers, timeout=60)
+        upload_resp.raise_for_status()
+    except Exception as e:
+        result['errors'].append(f"Upload failed: {e}")
+        return result
+    
+    # Step 4: Poll job status
+    status_url = f"https://api.{region_host}/api/v2/flows/datatables/{datatable_id}/import/jobs/{job_id}"
+    max_polls = 60
+    poll_interval = 2
+    
+    for _ in range(max_polls):
+        time.sleep(poll_interval)
+        status_data, err = make_api_request(status_url, access_token)
+        
+        if err:
+            continue
+        
+        status = status_data.get('status')
+        
+        if status == 'Succeeded':
+            result['success'] = len(date_mappings)
+            result['failed'] = 0
+            return result
+        elif status in ('Failed', 'Cancelled'):
+            result['errors'].append(f"Job {status}: {status_data.get('errorMessage', 'Unknown')}")
+            return result
+    
+    result['errors'].append("Job polling timeout")
+    return result
 
 # ============================================================================
 # FLASK ROUTES
