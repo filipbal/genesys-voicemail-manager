@@ -879,61 +879,45 @@ def cleanup_old_exports():
 # NEW HELPER: BULK IMPORT FOR DATA TABLES
 # ============================================================================
 
-def bulk_save_original_dates(access_token, region_host, datatable_id, rows_data):
-	"""
-	Performs a bulk import of original dates to the Genesys Data Table.
+def bulk_save_original_dates(access_token, region_host, datatable_id, mappings):
+	# Step 1: Create import job
+	url = f"https://api.{region_host}/api/v2/flows/datatables/{datatable_id}/import/jobs"
 	
-	Args:
-		rows_data: List of dicts [{'key': conversation_id, 'originalCreatedDate': date}, ...]
-	"""
-	if not rows_data or not datatable_id:
-		return
-
+	job_body = {
+		"importMode": "Append"  # or "ReplaceAll" if you want to replace
+	}
+	
+	job_response, error = make_api_request(url, access_token, method='POST', data=job_body)
+	
+	if error or not job_response:
+		return False
+	
+	upload_uri = job_response.get('uploadURI')
+	upload_headers = job_response.get('uploadHeaders', {})
+	
+	if not upload_uri:
+		return False
+	
+	# Step 2: Create CSV content
+	csv_data = "key,originalCreatedDate\n"
+	csv_data += "\n".join([f"{cid},{date}" for cid, date in mappings])
+	
+	# Step 3: Upload CSV to the uploadURI
+	req = urllib.request.Request(upload_uri, method='PUT')
+	req.add_header('Authorization', f'Bearer {access_token}')
+	
+	# Add any required upload headers from the job response
+	for header_key, header_value in upload_headers.items():
+		req.add_header(header_key, header_value)
+	
+	req.data = csv_data.encode('utf-8')
+	
 	try:
-		# 1. Create CSV content in memory
-		output = io.StringIO()
-		writer = csv.writer(output)
-		# Header must match Data Table field IDs
-		writer.writerow(['key', 'originalCreatedDate']) 
-		for row in rows_data:
-			writer.writerow([row['key'], row['originalCreatedDate']])
-		
-		csv_content = output.getvalue()
-
-		# 2. Create Import Job
-		job_url = f"https://api.{region_host}/api/v2/flows/datatables/{datatable_id}/import/jobs"
-		job_body = {"importMode": "Append"} 
-		
-		job_data, err = make_api_request(job_url, access_token, 'POST', job_body)
-		
-		if err or not job_data:
-			print(f"Failed to create import job: {err}")
-			return
-
-		upload_uri = job_data.get('uploadURI')
-		import_job_id = job_data.get('id')
-
-		if not upload_uri:
-			print("No upload URI returned for import job")
-			return
-
-		# 3. Upload CSV 
-		# Genesys requires a specific PUT/POST to the signed URL. 
-		# Standard urllib request for multipart/form-data or direct binary depending on provider.
-		# For Genesys Data Tables, posting the raw CSV data to the uploadURI usually works.
-		
-		req = urllib.request.Request(upload_uri, data=csv_content.encode('utf-8'), method='POST')
-		req.add_header('Content-Type', 'text/csv')
-		req.add_header('Authorization', f'Bearer {access_token}')
-		
-		with urllib.request.urlopen(req) as response:
-			if response.status not in [200, 201, 202, 204]:
-				print(f"CSV Upload failed: {response.status}")
-			else:
-				print(f"Bulk import job {import_job_id} initiated for {len(rows_data)} rows.")
-
+		with urllib.request.urlopen(req, timeout=60) as response:
+			return True
 	except Exception as e:
-		print(f"Exception during bulk data table import: {e}")
+		app.logger.error(f"Bulk upload error: {e}")
+		return False
 
 # ============================================================================
 # FLASK ROUTES
