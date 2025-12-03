@@ -31,6 +31,21 @@
 	</div>
 </div>
 
+{% if current_mailbox.type == 'group' %}
+<div class="alert alert-info mb-4">
+	<div class="d-flex align-items-center justify-content-between">
+		<div>
+			<i class="bi bi-info-circle-fill me-2"></i>
+			<strong>Group Mailbox:</strong> Original creation dates are available on demand.
+			<span id="dateLoadStatus" class="ms-2 text-muted"></span>
+		</div>
+		<button type="button" class="btn btn-sm btn-outline-primary" id="loadDatesBtn" onclick="loadOriginalDates()">
+			<i class="bi bi-calendar-check me-1"></i> Load Original Dates
+		</button>
+	</div>
+</div>
+{% endif %}
+
 <div class="alert alert-danger mb-4">
 	<div class="d-flex align-items-center">
 		<i class="bi bi-exclamation-triangle-fill me-3 fs-3"></i>
@@ -94,7 +109,9 @@
 				</thead>
 				<tbody>
 					{% for vm in voicemails %}
-					<tr class="voicemail-row">
+					<tr class="voicemail-row"
+						data-conversation-id="{{ vm.conversation_id or '' }}"
+						data-is-forwarded="{{ vm.is_forwarded|lower }}">
 						<td>
 							<input type="checkbox" class="form-check-input voicemail-checkbox" 
 								   value="{{ vm.id }}" data-caller="{{ vm.original_caller }}">
@@ -113,7 +130,7 @@
 						<td>
 							{{ vm.forwarded_by or '-' }}
 						</td>
-						<td>
+						<td class="original-date-cell">
 							<small>{{ vm.original_date or '-' }}</small>
 						</td>
 						<td>
@@ -280,6 +297,84 @@
 <script>
 const BATCH_SIZE = {{ batch_size }};
 let selectedVoicemails = [];
+
+// Load Original Dates functionality
+function loadOriginalDates() {
+	const btn = document.getElementById('loadDatesBtn');
+	const status = document.getElementById('dateLoadStatus');
+	
+	// Collect all conversation IDs from forwarded voicemails
+	const conversationIds = [];
+	document.querySelectorAll('.voicemail-row').forEach(row => {
+		const convId = row.dataset.conversationId;
+		const isForwarded = row.dataset.isForwarded === 'true';
+		if (convId && isForwarded) {
+			conversationIds.push(convId);
+		}
+	});
+	
+	if (conversationIds.length === 0) {
+		alert('No forwarded voicemails to load dates for');
+		return;
+	}
+	
+	// Show loading state
+	btn.disabled = true;
+	btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Loading...';
+	const estimatedTime = Math.ceil(conversationIds.length * 0.3);
+	status.textContent = `Fetching ${conversationIds.length} dates... (Est: ${estimatedTime}s)`;
+	
+	fetch('/api/load-original-dates', {
+		method: 'POST',
+		headers: {'Content-Type': 'application/json'},
+		body: JSON.stringify({conversation_ids: conversationIds})
+	})
+	.then(response => response.json())
+	.then(data => {
+		if (!data.success) {
+			alert('Failed to load dates: ' + (data.error || 'Unknown error'));
+			btn.disabled = false;
+			btn.innerHTML = '<i class="bi bi-calendar-check me-1"></i> Load Original Dates';
+			status.textContent = '';
+			return;
+		}
+		
+		// Update table cells with loaded dates
+		Object.entries(data.dates).forEach(([convId, date]) => {
+			const row = document.querySelector(`.voicemail-row[data-conversation-id="${convId}"]`);
+			if (row) {
+				const cell = row.querySelector('.original-date-cell');
+				if (cell) {
+					const formatted = formatDate(date);
+					cell.innerHTML = `<small class="text-success">${formatted}</small>`;
+				}
+			}
+		});
+		
+		status.innerHTML = `<i class="bi bi-check-circle-fill text-success me-1"></i>Loaded ${data.fetched} dates${data.failed > 0 ? ', ' + data.failed + ' not found' : ''}`;
+		status.classList.add('text-success');
+		btn.remove();
+	})
+	.catch(error => {
+		console.error('Error:', error);
+		alert('An error occurred while loading dates');
+		btn.disabled = false;
+		btn.innerHTML = '<i class="bi bi-calendar-check me-1"></i> Load Original Dates';
+		status.textContent = '';
+	});
+}
+
+function formatDate(isoString) {
+	try {
+		const dt = new Date(isoString);
+		return dt.toLocaleString('en-US', {
+			year: 'numeric', month: '2-digit', day: '2-digit',
+			hour: '2-digit', minute: '2-digit', second: '2-digit'
+		});
+	} catch {
+		return isoString;
+	}
+}
 
 // Voicemail selection handlers
 document.querySelectorAll('.voicemail-checkbox').forEach(checkbox => {

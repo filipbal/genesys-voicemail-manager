@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
-Genesys Cloud Voicemail Manager - v18
+Genesys Cloud Voicemail Manager - v19
 ==========================================
-CHANGES FROM v17:
-- Fixed "Fwd by: Unknown" - now correctly extracts from copiedFrom.user.name
-- Added original_date field for forwarded messages (from copiedFrom.date)
-- Improved date column semantics for source vs destination views
+CHANGES FROM v18:
+- Fixed 429 rate limit issue by implementing lazy loading for original dates
+- Added API_DELAY_DATATABLE constant for rate limiting
+- format_voicemail() now has load_original_dates=False parameter
+- Added /api/load-original-dates endpoint for voluntary date loading
 """
 
 import os
@@ -71,6 +72,7 @@ API_PAGE_SIZE = 100
 API_DELAY_GET = 1.0
 API_DELAY_WRITE = 1.0
 API_DELAY_GROUP_FETCH = 0.5  # Delay between fetching individual group details
+API_DELAY_DATATABLE = 0.3  # Delay between data table lookups (~200 req/min)
 
 # Batch settings
 BATCH_SIZE = 20
@@ -653,8 +655,15 @@ def process_voicemails_in_batches(access_token, region_host, voicemail_ids, oper
 # HELPERS
 # ============================================================================
 
-def format_voicemail(vm, access_token, region_host):
-	"""Format voicemail with full date and forwarding info"""
+def format_voicemail(vm, access_token, region_host, load_original_dates=False):
+	"""Format voicemail with full date and forwarding info
+	
+	Args:
+		vm: Voicemail data dict
+		access_token: OAuth bearer token
+		region_host: API region host
+		load_original_dates: If True, fetch original dates from data table (slow, causes rate limits)
+	"""
 	created = vm.get('createdDate', '')
 	modified = vm.get('modifiedDate', '')
 	
@@ -688,12 +697,13 @@ def format_voicemail(vm, access_token, region_host):
 		copied_from_user = copied_from.get('user', {})
 		forwarded_by = copied_from_user.get('name', 'Unknown')
 		
-		# Try Data Table first, then fallbacks
-		if conversation_id:
+		# Fallback chain: embedded -> copiedFrom.date
+		original_date = embedded_date if embedded_date else copied_from.get('date')
+		
+		# ONLY fetch data table if explicitly requested AND no fallback worked
+		if load_original_dates and not original_date and conversation_id and DATATABLE_ID:
 			original_date = get_original_date(access_token, region_host, DATATABLE_ID, conversation_id)
-			
-		if not original_date:
-			original_date = embedded_date if embedded_date else copied_from.get('date')
+			time.sleep(API_DELAY_DATATABLE)  # Rate limit protection
 
 	# Forwarding Info (Sent Side - LATEST ONLY)
 	copied_to = vm.get('copiedTo', [])
@@ -735,6 +745,7 @@ def format_voicemail(vm, access_token, region_host):
 		'forwarded_to': forwarded_to_name,
 		'forwarded_status_date': forwarded_status_date,
 		'filename': format_filename(vm),
+		'conversation_id': conversation_id,  # Add for frontend use
 	}
 
 def format_filename(voicemail):
@@ -903,7 +914,7 @@ def dashboard():
 		flash(f"Error fetching voicemails: {error}", 'warning')
 		voicemails = []
 
-	formatted = [format_voicemail(vm, token, host) for vm in voicemails]
+	formatted = [format_voicemail(vm, token, host, load_original_dates=False) for vm in voicemails]
 	preview = formatted[:20]
 
 	total_sec = sum(vm.get('audioRecordingDurationSeconds', 0) or 0 for vm in voicemails)
@@ -974,7 +985,7 @@ def download_page():
 	)
 	if not voicemails:
 		voicemails = []
-	formatted = [format_voicemail(vm, session.get('access_token'), session.get('region_host')) for vm in voicemails]
+	formatted = [format_voicemail(vm, session.get('access_token'), session.get('region_host'), load_original_dates=False) for vm in voicemails]
 	return render_template('download.html',
 						 user_info=session.get('user_info'),
 						 region=REGIONS.get(session.get('region_key')),
@@ -1003,7 +1014,7 @@ def forward_page():
 		mailbox_type=current_mailbox['type'],
 		mailbox_id=current_mailbox['id']
 	)
-	formatted = [format_voicemail(vm, session.get('access_token'), session.get('region_host')) for vm in (voicemails or [])]
+	formatted = [format_voicemail(vm, session.get('access_token'), session.get('region_host'), load_original_dates=False) for vm in (voicemails or [])]
 	return render_template('forward.html',
 						 user_info=session.get('user_info'),
 						 region=REGIONS.get(session.get('region_key')),
@@ -1032,7 +1043,7 @@ def delete_page():
 		mailbox_type=current_mailbox['type'],
 		mailbox_id=current_mailbox['id']
 	)
-	formatted = [format_voicemail(vm, session.get('access_token'), session.get('region_host')) for vm in (voicemails or [])]
+	formatted = [format_voicemail(vm, session.get('access_token'), session.get('region_host'), load_original_dates=False) for vm in (voicemails or [])]
 	return render_template('delete.html',
 						 user_info=session.get('user_info'),
 						 region=REGIONS.get(session.get('region_key')),
@@ -1098,6 +1109,57 @@ def api_switch_mailbox():
 
 	return jsonify({'success': True})
 
+@app.route('/api/load-original-dates', methods=['POST'])
+@login_required
+def load_original_dates():
+	"""
+	Load original dates from data table for specific voicemails.
+	Intended for group mailbox view where users want accurate original timestamps.
+	"""
+	data = request.get_json()
+	conversation_ids = data.get('conversation_ids', [])
+	
+	if not DATATABLE_ID:
+		return jsonify({'success': False, 'error': 'Data table not configured'}), 400
+	
+	if not conversation_ids:
+		return jsonify({'success': False, 'error': 'No conversation IDs provided'}), 400
+	
+	# Limit to prevent abuse
+	if len(conversation_ids) > 2000:
+		return jsonify({'success': False, 'error': 'Too many IDs (max 2000)'}), 400
+	
+	access_token = session.get('access_token')
+	region_host = session.get('region_host')
+	
+	results = {}
+	fetched = 0
+	failed = 0
+	
+	app.logger.info(f"Loading original dates for {len(conversation_ids)} conversations...")
+	
+	for conv_id in conversation_ids:
+		original_date = get_original_date(access_token, region_host, DATATABLE_ID, conv_id)
+		
+		if original_date:
+			results[conv_id] = original_date
+			fetched += 1
+		else:
+			failed += 1
+		
+		# Rate limiting
+		time.sleep(API_DELAY_DATATABLE)
+	
+	app.logger.info(f"Loaded {fetched} original dates, {failed} not found")
+	
+	return jsonify({
+		'success': True,
+		'dates': results,
+		'fetched': fetched,
+		'failed': failed,
+		'total': len(conversation_ids)
+	})
+
 @app.route('/logout')
 def logout():
 	session.clear()
@@ -1105,7 +1167,7 @@ def logout():
 
 @app.route('/health')
 def health():
-	return jsonify({'status': 'healthy', 'version': 'v18-forwarding-fix'})
+	return jsonify({'status': 'healthy', 'version': 'v19-lazy-loading'})
 
 @app.route('/documentation')
 def documentation():
