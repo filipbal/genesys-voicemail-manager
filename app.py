@@ -543,170 +543,117 @@ def get_user_groups(access_token, region_host):
 # OPTIMIZED BATCH PROCESSOR
 # ============================================================================
 
-def process_voicemails_in_batches(access_token, region_host, voicemail_ids, operation, 
+def process_voicemails_in_batches(access_token, region_host, voicemails_data, operation, 
 								   target_id=None, target_type='user', progress_id=None):
 	"""
-	Process voicemails in batches with optimized 'Forward' logic.
+	voicemails_data: list of dicts with 'id', 'createdDate', 'callerName', 'conversation' from search results
 	"""
 	app.logger.info(f"=== BATCH {operation.upper()} START ===")
-	app.logger.info(f"Input IDs: {len(voicemail_ids)}, Unique: {len(set(voicemail_ids))}")
+	app.logger.info(f"Input VMs: {len(voicemails_data)}")
 	
-	# Deduplicate input
-	original_count = len(voicemail_ids)
-	voicemail_ids = list(dict.fromkeys(voicemail_ids))
-	total_ids = len(voicemail_ids)
+	# Deduplicate by ID
+	seen = set()
+	unique_vms = []
+	for vm in voicemails_data:
+		if vm['id'] not in seen:
+			seen.add(vm['id'])
+			unique_vms.append(vm)
 	
-	results = {'success': 0, 'failed': 0, 'errors': [], 'total': total_ids, 'processed': 0}
+	if len(unique_vms) != len(voicemails_data):
+		app.logger.warning(f"Removed {len(voicemails_data) - len(unique_vms)} duplicates")
 	
-	# Initialize progress
+	results = {'success': 0, 'failed': 0, 'errors': [], 'total': len(unique_vms), 'processed': 0}
+	total = len(unique_vms)
+	
 	if progress_id:
-		progress_data[progress_id] = {
-			'processed': 0, 'total': total_ids, 
-			'success': 0, 'failed': 0, 'status': 'processing'
-		}
-
-	# ---------------------------------------------------------
-	# OPERATION: DELETE (Standard Sequential Processing)
-	# ---------------------------------------------------------
-	if operation == 'delete':
-		for i, vm_id in enumerate(voicemail_ids):
-			# Super batch sleep logic
-			if i > 0 and i % (BATCH_SIZE * SUPER_BATCH_SIZE) == 0:
-				time.sleep(SUPER_BATCH_DELAY)
-			
-			try:
-				url = f"https://api.{region_host}/api/v2/voicemail/messages/{vm_id}"
-				_, err = make_api_request(url, access_token, 'DELETE')
-				
-				if err is None:
-					results['success'] += 1
-				else:
-					results['failed'] += 1
-					results['errors'].append(f"VM {vm_id[:8]}: {err}")
-			except Exception as e:
-				results['failed'] += 1
-				results['errors'].append(f"VM {vm_id[:8]}: {str(e)}")
-			
-			# Update Progress
-			results['processed'] += 1
-			if progress_id:
-				progress_data[progress_id].update({
-					'processed': results['processed'],
-					'success': results['success'],
-					'failed': results['failed']
-				})
-			
-			time.sleep(API_DELAY_WRITE)
-
-	# ---------------------------------------------------------
-	# OPERATION: FORWARD (Optimized 3-Phase Processing)
-	# ---------------------------------------------------------
-	elif operation == 'forward':
-		forward_payloads = []
-		datatable_rows = []
+		progress_data[progress_id] = {'processed': 0, 'total': total, 'success': 0, 'failed': 0, 'status': 'processing'}
+	
+	date_mappings = []
+	
+	for i, vm in enumerate(unique_vms):
+		if i > 0 and i % (BATCH_SIZE * SUPER_BATCH_SIZE) == 0:
+			app.logger.info(f"Super batch break at item {i}, sleeping {SUPER_BATCH_DELAY}s...")
+			time.sleep(SUPER_BATCH_DELAY)
 		
-		# PHASE 1: Fetch details and prepare data
-		app.logger.info("Phase 1: Fetching voicemail details...")
+		vm_id = vm['id']
+		success = False
+		msg = ""
 		
-		for i, vm_id in enumerate(voicemail_ids):
-			# Super batch sleep logic for reads
-			if i > 0 and i % (BATCH_SIZE * SUPER_BATCH_SIZE) == 0:
-				time.sleep(SUPER_BATCH_DELAY)
+		try:
+			if operation == 'forward':
+				original_created = vm.get('createdDate')
+				original_caller_name = vm.get('callerName', 'Unknown')
+				conversation_id = vm.get('conversation', {}).get('id')
 
-			try:
-				vm_url = f"https://api.{region_host}/api/v2/voicemail/messages/{vm_id}"
-				vm_data, vm_err = make_api_request(vm_url, access_token, 'GET')
-				
-				if vm_err or not vm_data:
-					results['failed'] += 1
-					results['errors'].append(f"VM {vm_id[:8]}: Fetch failed - {vm_err}")
-					# Count as processed since we won't try to forward it
-					results['processed'] += 1
-					if progress_id:
-						progress_data[progress_id]['failed'] += 1
-						progress_data[progress_id]['processed'] += 1
-					continue
-
-				# Extract Data
-				original_created = vm_data.get('createdDate')
-				conversation_id = vm_data.get('conversation', {}).get('id')
-
-				# 1. Prepare Data Table Row
-				if conversation_id and original_created:
-					datatable_rows.append({
-						'key': conversation_id,
-						'originalCreatedDate': original_created
+				if conversation_id and original_created and DATATABLE_ID:
+					date_mappings.append({
+						'conversation_id': conversation_id,
+						'original_date': original_created
 					})
 
-				# 2. Prepare Forward Payload
+				url = f"https://api.{region_host}/api/v2/voicemail/messages"
 				body = {"voicemailMessageId": vm_id}
+				
 				if target_type == 'group':
 					body["groupId"] = target_id
 				else:
 					body["userId"] = target_id
 				
-				# Note: callerAddress embedding removed as Genesys API ignores custom values here
+				if original_created:
+					body["callerAddress"] = f"[{original_created}] {original_caller_name}"
 				
-				forward_payloads.append(body)
+				response_data, err = make_api_request(url, access_token, 'POST', body)
+				success = (err is None)
+				msg = err
 				
-				time.sleep(API_DELAY_GET)
-
-			except Exception as e:
+				if success and response_data:
+					new_id = response_data.get('id', 'unknown')
+					app.logger.debug(f"Forward OK: {vm_id[:8]} -> new ID: {new_id[:8] if new_id != 'unknown' else 'unknown'}")
+				elif not success:
+					app.logger.error(f"Forward FAIL: {vm_id[:8]} - {msg}")
+			
+			elif operation == 'delete':
+				url = f"https://api.{region_host}/api/v2/voicemail/messages/{vm_id}"
+				_, err = make_api_request(url, access_token, 'DELETE')
+				success = (err is None)
+				msg = err
+				
+				if not success:
+					app.logger.error(f"Delete FAIL: {vm_id[:8]} - {msg}")
+			
+			if success:
+				results['success'] += 1
+			else:
 				results['failed'] += 1
-				results['errors'].append(f"VM {vm_id[:8]}: Phase 1 Error - {str(e)}")
-				results['processed'] += 1
-				if progress_id:
-					progress_data[progress_id]['failed'] += 1
-					progress_data[progress_id]['processed'] += 1
-
-		# PHASE 2: Bulk Data Table Update (Background Thread)
-		# We fire this off asynchronously so forwarding can start immediately.
-		if datatable_rows and DATATABLE_ID:
-			app.logger.info(f"Phase 2: Bulk updating {len(datatable_rows)} dates...")
-			threading.Thread(
-				target=bulk_save_original_dates, 
-				args=(access_token, region_host, DATATABLE_ID, datatable_rows),
-				daemon=True
-			).start()
-
-		# PHASE 3: Execute Forwards
-		app.logger.info(f"Phase 3: Executing {len(forward_payloads)} forwards...")
+				results['errors'].append(f"VM {vm_id[:8]}: {msg}")
+				
+		except Exception as e:
+			results['failed'] += 1
+			results['errors'].append(f"VM {vm_id[:8]}: {str(e)}")
+			app.logger.exception(f"Exception processing {vm_id[:8]}: {e}")
+			
+		results['processed'] += 1
 		
-		for i, body in enumerate(forward_payloads):
-			# Super batch sleep logic for writes
-			if i > 0 and i % (BATCH_SIZE * SUPER_BATCH_SIZE) == 0:
-				time.sleep(SUPER_BATCH_DELAY)
-				
-			try:
-				url = f"https://api.{region_host}/api/v2/voicemail/messages"
-				_, err = make_api_request(url, access_token, 'POST', body)
-				
-				if err is None:
-					results['success'] += 1
-				else:
-					results['failed'] += 1
-					results['errors'].append(f"Forward failed: {err}")
-
-			except Exception as e:
-				results['failed'] += 1
-				results['errors'].append(f"Forward Exception: {str(e)}")
+		if progress_id:
+			progress_data[progress_id].update({
+				'processed': results['processed'],
+				'success': results['success'],
+				'failed': results['failed']
+			})
+		
+		if (i + 1) % 50 == 0:
+			app.logger.info(f"Progress: {i+1}/{total} - Success: {results['success']}, Failed: {results['failed']}")
 			
-			# Update Progress (Only counting successful fetches that are now being forwarded)
-			results['processed'] += 1
-			if progress_id:
-				progress_data[progress_id].update({
-					'processed': results['processed'],
-					'success': results['success'],
-					'failed': results['failed']
-				})
-			
-			time.sleep(API_DELAY_WRITE)
-
-	# Final Status Update
+		time.sleep(API_DELAY_WRITE)
+	
+	if operation == 'forward' and date_mappings:
+		app.logger.info(f"Bulk saving {len(date_mappings)} date mappings...")
+		bulk_save_original_dates(access_token, region_host, DATATABLE_ID, date_mappings)
+	
 	if progress_id:
 		progress_data[progress_id]['status'] = 'complete'
 	
-	app.logger.info(f"=== BATCH {operation.upper()} END === Total: {total_ids}, Success: {results['success']}, Failed: {results['failed']}")
+	app.logger.info(f"=== BATCH {operation.upper()} END === Total: {total}, Success: {results['success']}, Failed: {results['failed']}")
 	
 	return results
 
@@ -879,55 +826,54 @@ def cleanup_old_exports():
 # NEW HELPER: BULK IMPORT FOR DATA TABLES
 # ============================================================================
 
-def bulk_save_original_dates(access_token, region_host, datatable_id, mappings):
+def bulk_save_original_dates(access_token, region_host, datatable_id, date_mappings):
+	"""
+	Bulk save original dates using import job.
+	date_mappings: list of {"conversation_id": "...", "original_date": "..."}
+	"""
+	if not date_mappings or not datatable_id:
+		return True
+	
 	# Step 1: Create import job
-	url = f"https://api.{region_host}/api/v2/flows/datatables/{datatable_id}/import/jobs"
+	job_url = f"https://api.{region_host}/api/v2/flows/datatables/{datatable_id}/import/jobs"
+	job_body = {"importMode": "Append"}
 	
-	job_body = {
-		"importMode": "Append"
-	}
-	
-	job_response, error = make_api_request(url, access_token, method='POST', data=job_body)
-	
-	if error or not job_response:
-		app.logger.error(f"Import job creation failed: {error}")
+	job_data, error = make_api_request(job_url, access_token, method='POST', data=job_body)
+	if error:
+		app.logger.error(f"Failed to create import job: {error}")
 		return False
 	
-	upload_uri = job_response.get('uploadURI')
-	upload_headers = job_response.get('uploadHeaders', {})
+	upload_uri = job_data.get('uploadURI')
+	upload_headers = job_data.get('uploadHeaders', {})
 	
 	if not upload_uri:
-		app.logger.error("No uploadURI in response")
+		app.logger.error("No uploadURI in job response")
 		return False
 	
-	# Step 2: Create CSV content
-	csv_data = "key,originalCreatedDate\n"
-	csv_data += "\n".join([f"{cid},{date}" for cid, date in mappings])
+	# Step 2: Build CSV content
+	csv_lines = ["key,originalCreatedDate"]
+	for mapping in date_mappings:
+		csv_lines.append(f"{mapping['conversation_id']},{mapping['original_date']}")
+	csv_content = "\n".join(csv_lines)
 	
-	# Step 3: Upload CSV
-	req = urllib.request.Request(upload_uri, method='POST')
-	
-	# Add headers from response first
-	for header_key, header_value in upload_headers.items():
-		req.add_header(header_key, header_value)
-	
-	# Add Authorization if not in uploadHeaders
-	if 'Authorization' not in upload_headers:
-		req.add_header('Authorization', f'Bearer {access_token}')
-	
-	# Set Content-Type if not already set
-	if 'Content-Type' not in upload_headers:
-		req.add_header('Content-Type', 'text/csv')
-	
-	req.data = csv_data.encode('utf-8')
+	# Step 3: Upload file to uploadURI
+	req = urllib.request.Request(upload_uri, data=csv_content.encode('utf-8'), method='PUT')
+	for header_key, header_val in upload_headers.items():
+		req.add_header(header_key, header_val)
+	req.add_header('Content-Type', 'text/csv')
 	
 	try:
-		with urllib.request.urlopen(req, timeout=60) as response:
-			app.logger.info(f"Bulk upload successful: {len(mappings)} records")
+		with urllib.request.urlopen(req, timeout=120) as response:
+			app.logger.info(f"Bulk upload successful: {len(date_mappings)} rows")
 			return True
+	except urllib.request.HTTPError as e:
+		error_body = e.read().decode() if e.fp else str(e)
+		app.logger.error(f"Bulk upload error: {e.code} - {error_body}")
+		return False
 	except Exception as e:
 		app.logger.error(f"Bulk upload error: {e}")
 		return False
+
 
 # ============================================================================
 # FLASK ROUTES
@@ -1172,8 +1118,20 @@ def api_forward():
 	schedule_keepalive()
 	data = request.get_json()
 	ids = data.get('voicemail_ids', [])
+	
+	# Fetch full voicemail data for selected IDs
+	all_vms, _ = get_all_voicemails(
+		session.get('access_token'),
+		session.get('region_host'),
+		mailbox_type=get_current_mailbox()['type'],
+		mailbox_id=get_current_mailbox()['id']
+	)
+	
+	# Filter to only selected IDs
+	selected_vms = [vm for vm in (all_vms or []) if vm['id'] in ids]
+	
 	res = process_voicemails_in_batches(
-		session.get('access_token'), session.get('region_host'), ids, 'forward',
+		session.get('access_token'), session.get('region_host'), selected_vms, 'forward',
 		target_id=data.get('target_id'), target_type=data.get('target_type')
 	)
 	return jsonify(res)
@@ -1184,8 +1142,12 @@ def api_delete():
 	schedule_keepalive()
 	data = request.get_json()
 	ids = data.get('voicemail_ids', [])
+	
+	# For delete, we only need IDs - create minimal vm objects
+	vms_data = [{'id': vm_id} for vm_id in ids]
+	
 	res = process_voicemails_in_batches(
-		session.get('access_token'), session.get('region_host'), ids, 'delete'
+		session.get('access_token'), session.get('region_host'), vms_data, 'delete'
 	)
 	return jsonify(res)
 
