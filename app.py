@@ -181,6 +181,13 @@ def set_current_mailbox(mailbox_type, mailbox_id, mailbox_name):
 	}
 	app.logger.info(f"Switched to mailbox: {mailbox_type} - {mailbox_name} ({mailbox_id})")
 
+def get_cached_user_groups():
+	"""
+	Get cached user groups from session.
+	Returns a list of groups that was fetched at login time.
+	"""
+	return session.get('user_groups', [])
+
 def initialize_default_mailbox():
 	"""
 	Initialize the mailbox to the user's own mailbox if not already set.
@@ -519,8 +526,8 @@ def get_user_groups(access_token, region_host):
 				'name': group_data.get('name', 'Unknown Group'),
 				'memberCount': group_data.get('memberCount', 0)
 			})
-		
-		time.sleep(0.1)  # Rate limit protection
+
+		time.sleep(0.5)  # Rate limit protection
 	
 	app.logger.info(f"Fetched details for {len(detailed_groups)} groups")
 	return detailed_groups, None
@@ -856,7 +863,16 @@ def callback():
 	user = get_user_info(token, session.get('region_host'))
 	if user:
 		session['user_info'] = user
-	
+
+		# Cache user groups at login time to avoid repeated API calls
+		user_groups, groups_error = get_user_groups(token, session.get('region_host'))
+		if groups_error:
+			app.logger.warning(f"Error fetching groups at login: {groups_error}")
+			session['user_groups'] = []
+		else:
+			session['user_groups'] = user_groups if user_groups else []
+			app.logger.info(f"Cached {len(session['user_groups'])} groups at login")
+
 	return redirect(url_for('dashboard'))
 
 @app.route('/dashboard')
@@ -868,20 +884,8 @@ def dashboard():
 	# Initialize default mailbox if not set
 	initialize_default_mailbox()
 
-	# Fetch user's groups
-	user_groups, groups_error = get_user_groups(token, host)
-	if groups_error:
-		app.logger.warning(f"Error fetching groups: {groups_error}")
-		user_groups = []
-
-	# Ensure user_groups is always a list
-	if user_groups is None:
-		user_groups = []
-
-	# Debug logging
-	app.logger.info(f"Dashboard: user_groups count = {len(user_groups)}")
-	if user_groups:
-		app.logger.info(f"Dashboard: First group = {user_groups[0].get('name', 'Unknown')}")
+	# Get cached user groups from session
+	user_groups = get_cached_user_groups()
 
 	# Get current mailbox
 	current_mailbox = get_current_mailbox()
@@ -954,11 +958,8 @@ def download_page():
 	# Initialize default mailbox if not set
 	initialize_default_mailbox()
 
-	# Fetch user's groups
-	user_groups, _ = get_user_groups(session.get('access_token'), session.get('region_host'))
-	# Ensure user_groups is always a list
-	if not user_groups or user_groups is None:
-		user_groups = []
+	# Get cached user groups from session
+	user_groups = get_cached_user_groups()
 
 	# Get current mailbox
 	current_mailbox = get_current_mailbox()
@@ -988,11 +989,8 @@ def forward_page():
 	# Initialize default mailbox if not set
 	initialize_default_mailbox()
 
-	# Fetch user's groups
-	user_groups, _ = get_user_groups(session.get('access_token'), session.get('region_host'))
-	# Ensure user_groups is always a list
-	if not user_groups or user_groups is None:
-		user_groups = []
+	# Get cached user groups from session
+	user_groups = get_cached_user_groups()
 
 	# Get current mailbox
 	current_mailbox = get_current_mailbox()
@@ -1020,11 +1018,8 @@ def delete_page():
 	# Initialize default mailbox if not set
 	initialize_default_mailbox()
 
-	# Fetch user's groups
-	user_groups, _ = get_user_groups(session.get('access_token'), session.get('region_host'))
-	# Ensure user_groups is always a list
-	if not user_groups or user_groups is None:
-		user_groups = []
+	# Get cached user groups from session
+	user_groups = get_cached_user_groups()
 
 	# Get current mailbox
 	current_mailbox = get_current_mailbox()
