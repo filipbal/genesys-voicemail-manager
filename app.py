@@ -890,30 +890,36 @@ def bulk_save_original_dates(access_token, region_host, datatable_id, mappings):
 	job_response, error = make_api_request(url, access_token, method='POST', data=job_body)
 	
 	if error or not job_response:
+		app.logger.error(f"Import job creation failed: {error}")
 		return False
 	
 	upload_uri = job_response.get('uploadURI')
 	upload_headers = job_response.get('uploadHeaders', {})
 	
 	if not upload_uri:
+		app.logger.error("No uploadURI in response")
 		return False
 	
 	# Step 2: Create CSV content
 	csv_data = "key,originalCreatedDate\n"
 	csv_data += "\n".join([f"{cid},{date}" for cid, date in mappings])
 	
-	# Step 3: Upload CSV to the pre-signed uploadURI
-	req = urllib.request.Request(upload_uri, method='PUT')
+	# Step 3: Upload CSV - try POST instead of PUT
+	req = urllib.request.Request(upload_uri, method='POST')
 	
-	# REMOVE Authorization header - pre-signed URL doesn't need it
-	# Only add headers from uploadHeaders response
+	# Add headers from response
 	for header_key, header_value in upload_headers.items():
 		req.add_header(header_key, header_value)
+	
+	# Set Content-Type if not already in uploadHeaders
+	if 'Content-Type' not in upload_headers:
+		req.add_header('Content-Type', 'text/csv')
 	
 	req.data = csv_data.encode('utf-8')
 	
 	try:
 		with urllib.request.urlopen(req, timeout=60) as response:
+			app.logger.info(f"Bulk upload successful: {len(mappings)} records")
 			return True
 	except Exception as e:
 		app.logger.error(f"Bulk upload error: {e}")
