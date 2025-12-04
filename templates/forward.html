@@ -2,6 +2,18 @@
 
 {% block title %}Forward Voicemails{% endblock %}
 
+{% block extra_css %}
+<style>
+.spin-slow {
+	animation: spin 2s linear infinite;
+}
+@keyframes spin {
+	from { transform: rotate(0deg); }
+	to { transform: rotate(360deg); }
+}
+</style>
+{% endblock %}
+
 {% block content %}
 <div class="user-info" style="background: linear-gradient(135deg, #ffc107 0%, #ff8c00 100%);">
 	<div class="row align-items-center">
@@ -94,7 +106,7 @@
 		<div id="searchResults" class="mb-3" style="display: none;">
 			<label class="form-label">Select recipient:</label>
 			<div id="searchResultsList" class="list-group" style="max-height: 200px; overflow-y: auto;">
-				</div>
+			</div>
 		</div>
 
 		<div id="selectedTarget" class="alert alert-success" style="display: none;">
@@ -257,7 +269,7 @@
 					</div>
 				</div>
 				<p class="text-center mb-2">
-					Processing <strong id="progressTotal">0</strong> voicemails in batches...
+					Processing <strong id="progressTotal">0</strong> voicemails...
 				</p>
 				<div class="progress mb-3" style="height: 25px;">
 					<div class="progress-bar bg-warning progress-bar-striped progress-bar-animated"
@@ -265,9 +277,9 @@
 						0%
 					</div>
 				</div>
-				<p class="text-center text-muted small mb-0">
-					<i class="bi bi-info-circle me-1"></i>
-					Please wait. This may take several minutes for large batches.
+				<p class="text-center text-muted small mb-0" id="progressPhaseText">
+					<i class="bi bi-hourglass-split me-1"></i>
+					Initializing...
 				</p>
 			</div>
 		</div>
@@ -285,7 +297,7 @@
 				<button type="button" class="btn-close" data-bs-dismiss="modal"></button>
 			</div>
 			<div class="modal-body" id="resultsBody">
-				</div>
+			</div>
 			<div class="modal-footer">
 				<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
 				<a href="{{ url_for('dashboard') }}" class="btn btn-primary">
@@ -308,7 +320,6 @@ function loadOriginalDates() {
 	const btn = document.getElementById('loadDatesBtn');
 	const status = document.getElementById('dateLoadStatus');
 	
-	// Collect all conversation IDs from forwarded voicemails
 	const conversationIds = [];
 	document.querySelectorAll('.voicemail-row').forEach(row => {
 		const convId = row.dataset.conversationId;
@@ -323,7 +334,6 @@ function loadOriginalDates() {
 		return;
 	}
 	
-	// Show loading state
 	btn.disabled = true;
 	btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Loading...';
 	const estimatedTime = Math.ceil(conversationIds.length * 0.3);
@@ -344,7 +354,6 @@ function loadOriginalDates() {
 			return;
 		}
 		
-		// Update table cells with loaded dates
 		Object.entries(data.dates).forEach(([convId, date]) => {
 			const row = document.querySelector(`.voicemail-row[data-conversation-id="${convId}"]`);
 			if (row) {
@@ -531,7 +540,6 @@ function updateSelectedCount() {
 	const count = document.querySelectorAll('.voicemail-checkbox:checked').length;
 	document.getElementById('selectedCount').textContent = `${count} voicemail${count !== 1 ? 's' : ''} selected`;
 	
-	// Show batch info for large selections
 	const batchInfo = document.getElementById('batchInfo');
 	const batchCount = document.getElementById('batchCount');
 	
@@ -567,23 +575,45 @@ function forwardVoicemails() {
 	}
 	
 	// Show progress modal
-	document.getElementById('progressTotal').textContent = voicemailIds.length;
+	const totalVms = voicemailIds.length;
+	document.getElementById('progressTotal').textContent = totalVms;
 	document.getElementById('progressBar').style.width = '0%';
 	document.getElementById('progressBar').textContent = '0%';
+	document.getElementById('progressPhaseText').innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Initializing...';
 	
 	const progressModal = new bootstrap.Modal(document.getElementById('progressModal'));
 	progressModal.show();
 	
-	const batches = Math.ceil(voicemailIds.length / BATCH_SIZE);
-	const estimatedSeconds = batches * 1.5 + 5;
+	// Phase-based progress timing (in ms)
+	const phase1Duration = 500;
+	const phase2Duration = totalVms * 300;
+	const phase3Duration = totalVms * 600;
 	
-	let progress = 0;
+	let elapsed = 0;
 	const progressInterval = setInterval(() => {
-		const increment = (90 / (estimatedSeconds * 10));
-		progress += increment;
-		if (progress > 95) progress = 95;
-		document.getElementById('progressBar').style.width = progress + '%';
-		document.getElementById('progressBar').textContent = Math.round(progress) + '%';
+		elapsed += 100;
+		
+		let percent, phaseText;
+		
+		if (elapsed < phase1Duration) {
+			percent = (elapsed / phase1Duration) * 5;
+			phaseText = '<i class="bi bi-gear-fill me-1 spin-slow"></i>Phase 1: Preparing metadata...';
+		} else if (elapsed < phase1Duration + phase2Duration) {
+			const phase2Elapsed = elapsed - phase1Duration;
+			percent = 5 + (phase2Elapsed / phase2Duration) * 35;
+			phaseText = '<i class="bi bi-database me-1 spin-slow"></i>Phase 2: Saving original dates...';
+		} else {
+			const phase3Elapsed = elapsed - phase1Duration - phase2Duration;
+			percent = 40 + (phase3Elapsed / phase3Duration) * 55;
+			phaseText = '<i class="bi bi-forward-fill me-1 spin-slow"></i>Phase 3: Forwarding messages...';
+		}
+		
+		if (percent > 95) percent = 95;
+		
+		document.getElementById('progressBar').style.width = percent + '%';
+		document.getElementById('progressBar').textContent = Math.round(percent) + '%';
+		document.getElementById('progressPhaseText').innerHTML = phaseText;
+		
 	}, 100);
 	
 	// Show loading state on button
@@ -608,6 +638,7 @@ function forwardVoicemails() {
 		clearInterval(progressInterval);
 		document.getElementById('progressBar').style.width = '100%';
 		document.getElementById('progressBar').textContent = '100%';
+		document.getElementById('progressPhaseText').innerHTML = '<i class="bi bi-check-circle-fill me-1 text-success"></i>Complete!';
 		
 		setTimeout(() => {
 			progressModal.hide();
