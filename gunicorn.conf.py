@@ -1,19 +1,19 @@
-# Gunicorn configuration for Voicemail Manager
-# Updated for large downloads (500+ voicemails)
+# gunicorn.conf.py
+import os
 
-# Worker timeout - set to 5400s (90 minutes) for safety margin
-timeout = 5400  # 90 minutes (leaves 10min buffer under Render's 100min limit)
+# Worker timeout - 90 minutes
+timeout = 5400
 
-# Graceful timeout for worker restart
-graceful_timeout = 300  # 5 minutes (increased for long operations)
+# Graceful timeout
+graceful_timeout = 300
 
-# Keep-alive connections
-keepalive = 2  # Lower = less overhead, we're doing long-running operations
+# Keep-alive - increase for Render's load balancer
+keepalive = 75
 
-# Number of workers
-workers = 2  # Keep at 2
+# Workers - 2 is fine for single user + 0.1 CPU
+workers = 2
 
-# Worker class - sync is fine for our use case
+# Worker class
 worker_class = "sync"
 
 # Logging
@@ -21,6 +21,5 @@ accesslog = "-"
 errorlog = "-"
 loglevel = "info"
 
-# Bind to port (Render sets PORT env var)
-import os
+# Bind
 bind = f"0.0.0.0:{os.environ.get('PORT', '5000')}"

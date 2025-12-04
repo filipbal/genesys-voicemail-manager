@@ -40,6 +40,25 @@ import csv
 # ============================================================================
 
 app = Flask(__name__)
+
+def start_keepalive_loop():
+    """Ping /health every 12 minutes to prevent spin down"""
+    def keepalive_worker():
+        while True:
+            time.sleep(720)  # 12 minutes
+            try:
+                url = os.environ.get('RENDER_EXTERNAL_URL', 'http://127.0.0.1:5000')
+                urllib.request.urlopen(f"{url}/health", timeout=10)
+                app.logger.info("Keepalive ping sent")
+            except Exception as e:
+                app.logger.warning(f"Keepalive failed: {e}")
+    
+    if os.environ.get('RENDER_EXTERNAL_URL'):  # Only on Render
+        threading.Thread(target=keepalive_worker, daemon=True).start()
+        app.logger.info("Keepalive loop started")
+
+start_keepalive_loop()
+
 app.secret_key = os.environ.get('FLASK_SECRET_KEY', secrets.token_hex(32))
 
 app.config['SESSION_TYPE'] = 'filesystem'
@@ -1006,7 +1025,6 @@ def delete_page():
 @app.route('/api/forward', methods=['POST'])
 @login_required
 def api_forward():
-	schedule_keepalive()
 	data = request.get_json()
 	ids = data.get('voicemail_ids', [])
 	
@@ -1028,7 +1046,6 @@ def api_forward():
 @app.route('/api/delete', methods=['POST'])
 @login_required
 def api_delete():
-	schedule_keepalive()
 	data = request.get_json()
 	ids = data.get('voicemail_ids', [])
 	
@@ -1152,15 +1169,6 @@ def duration_filter(value):
 @app.template_filter('datetime_short')
 def datetime_short_filter(value):
 	return format_datetime_short(value)
-
-def schedule_keepalive():
-	def ping():
-		time.sleep(840)
-		try:
-			urllib.request.urlopen(request.host_url + "health", timeout=5)
-		except:
-			pass
-	threading.Thread(target=ping, daemon=True).start()
 
 if __name__ == '__main__':
 	app.run(debug=True, host='127.0.0.1', port=5000)
