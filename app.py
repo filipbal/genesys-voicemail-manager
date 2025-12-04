@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """
-Genesys Cloud Voicemail Manager - v19
+Genesys Cloud Voicemail Manager - v20
 ==========================================
-CHANGES FROM v18:
-- Fixed 429 rate limit issue by implementing lazy loading for original dates
-- Added API_DELAY_DATATABLE constant for rate limiting
-- format_voicemail() now has load_original_dates=False parameter
-- Added /api/load-original-dates endpoint for voluntary date loading
+CHANGES FROM v19:
+- Refactored forward to 3-phase approach:
+  Phase 1: Prepare dictionary (conversation_id -> createdDate)
+  Phase 2: Populate datatable row by row (0.25s delay)
+  Phase 3: Forward messages (0.5s delay)
+- Removed bulk import job approach
+- Removed embedded timestamp in callerAddress
+- Any datatable error aborts entire operation
 """
 
 import os
@@ -29,10 +32,8 @@ from flask import (
 	session, flash, send_file, jsonify, Response
 )
 
-# For bulk import
 import io
-import csv 
-import requests
+import csv
 
 # ============================================================================
 # FLASK APP CONFIGURATION
@@ -76,8 +77,8 @@ API_PAGE_SIZE = 100
 # PROACTIVE DELAYS (Seconds)
 API_DELAY_GET = 0.3
 API_DELAY_WRITE = 0.5
-API_DELAY_GROUP_FETCH = 0.5  # Delay between fetching individual group details
-API_DELAY_DATATABLE = 0.3  # Delay between data table lookups (~200 req/min)
+API_DELAY_DATATABLE = 0.25  # 240/min, safe buffer under 300/min limit
+API_DELAY_GROUP_FETCH = 0.5
 
 # Batch settings
 BATCH_SIZE = 20
@@ -94,11 +95,12 @@ user_operation_locks = defaultdict(threading.Lock)
 # ============================================================================
 
 def save_original_date(access_token, region_host, datatable_id, conversation_id, original_date):
-	"""Write original date to data table using POST (Create)"""
-	# URL points to the collection, not the specific row
+	"""Write original date to data table using POST (Create). Returns (success, error_message)."""
+	if not datatable_id or not conversation_id or not original_date:
+		return False, "Missing required parameters"
+	
 	url = f"https://api.{region_host}/api/v2/flows/datatables/{datatable_id}/rows"
 	
-	# Payload must use 'key' for the primary key
 	data = {
 		"key": conversation_id, 
 		"originalCreatedDate": original_date
@@ -107,12 +109,9 @@ def save_original_date(access_token, region_host, datatable_id, conversation_id,
 	response, error = make_api_request(url, access_token, method='POST', data=data)
 	
 	if error:
-		# Ignore 409 Conflict (Row already exists)
-		if "409" in str(error) or "conflict" in str(error).lower():
-			return True
-		print(f"Data Table Error: {error}")
+		return False, error
 		
-	return error is None
+	return True, None
 
 def get_original_date(access_token, region_host, datatable_id, conversation_id):
 	"""Read original date from data table"""
@@ -157,15 +156,10 @@ def login_required(f):
 # ============================================================================
 
 def get_current_mailbox():
-	"""
-	Get the currently selected mailbox from session.
-	Returns dict with keys: type ('user' or 'group'), id, name
-	If not set, returns default user mailbox.
-	"""
+	"""Get the currently selected mailbox from session."""
 	if 'current_mailbox' in session:
 		return session['current_mailbox']
 
-	# Default to user's own mailbox
 	user_info = session.get('user_info', {})
 	return {
 		'type': 'user',
@@ -174,14 +168,7 @@ def get_current_mailbox():
 	}
 
 def set_current_mailbox(mailbox_type, mailbox_id, mailbox_name):
-	"""
-	Set the current mailbox in session.
-
-	Args:
-		mailbox_type: 'user' or 'group'
-		mailbox_id: ID of the user or group
-		mailbox_name: Display name for the mailbox
-	"""
+	"""Set the current mailbox in session."""
 	session['current_mailbox'] = {
 		'type': mailbox_type,
 		'id': mailbox_id,
@@ -190,17 +177,11 @@ def set_current_mailbox(mailbox_type, mailbox_id, mailbox_name):
 	app.logger.info(f"Switched to mailbox: {mailbox_type} - {mailbox_name} ({mailbox_id})")
 
 def get_cached_user_groups():
-	"""
-	Get cached user groups from session.
-	Returns a list of groups that was fetched at login time.
-	"""
+	"""Get cached user groups from session."""
 	return session.get('user_groups', [])
 
 def initialize_default_mailbox():
-	"""
-	Initialize the mailbox to the user's own mailbox if not already set.
-	Should be called after login.
-	"""
+	"""Initialize the mailbox to the user's own mailbox if not already set."""
 	if 'current_mailbox' not in session:
 		user_info = session.get('user_info', {})
 		set_current_mailbox('user', user_info.get('id'), user_info.get('name', 'My Voicemails'))
@@ -295,21 +276,10 @@ def get_user_info(access_token, region_host):
 	return data
 
 def get_all_voicemails(access_token, region_host, user_id=None, mailbox_type='user', mailbox_id=None):
-	"""
-	Fetch voicemails for either a user or group mailbox.
-
-	Args:
-		access_token: OAuth bearer token
-		region_host: API region host
-		user_id: User ID (only used when mailbox_type='user' and mailbox_id is None)
-		mailbox_type: Either 'user' or 'group'
-		mailbox_id: ID of the user or group to fetch voicemails for
-	"""
+	"""Fetch voicemails for either a user or group mailbox."""
 	all_entities = []
 
-	# Determine the actual ID to use
 	if mailbox_type == 'user':
-		# For user mailbox, use mailbox_id if provided, otherwise use user_id or fetch current user
 		if not mailbox_id:
 			if not user_id:
 				user_info = get_user_info(access_token, region_host)
@@ -319,7 +289,6 @@ def get_all_voicemails(access_token, region_host, user_id=None, mailbox_type='us
 			else:
 				mailbox_id = user_id
 
-		# Use POST search for user voicemails
 		url = f"https://api.{region_host}/api/v2/voicemail/search"
 		page_number = 1
 		page_size = API_PAGE_SIZE
@@ -328,26 +297,16 @@ def get_all_voicemails(access_token, region_host, user_id=None, mailbox_type='us
 			"pageSize": page_size,
 			"pageNumber": page_number,
 			"query": [
-				{
-					"fields": ["owner"],
-					"type": "EXACT",
-					"value": "user"
-				},
-				{
-					"fields": ["ownerId"],
-					"type": "EXACT",
-					"value": mailbox_id
-				}
+				{"fields": ["owner"], "type": "EXACT", "value": "user"},
+				{"fields": ["ownerId"], "type": "EXACT", "value": mailbox_id}
 			]
 		}
 
 		app.logger.info(f"Fetching voicemails for user {mailbox_id} via POST search...")
-
 		total_expected = None
 
 		while True:
 			search_body["pageNumber"] = page_number
-
 			data, error = make_api_request(url, access_token, method='POST', data=search_body)
 
 			if error:
@@ -364,7 +323,6 @@ def get_all_voicemails(access_token, region_host, user_id=None, mailbox_type='us
 				app.logger.info(f"API reports {total_expected} total voicemails")
 
 			page_count = data.get('pageCount', 0)
-
 			if page_number >= page_count or not results:
 				break
 
@@ -372,7 +330,6 @@ def get_all_voicemails(access_token, region_host, user_id=None, mailbox_type='us
 			time.sleep(API_DELAY_GET)
 
 	elif mailbox_type == 'group':
-		# Use POST search for group voicemails (same pattern as user voicemails)
 		if not mailbox_id:
 			return None, "Group ID required for group mailbox"
 
@@ -384,26 +341,16 @@ def get_all_voicemails(access_token, region_host, user_id=None, mailbox_type='us
 			"pageSize": page_size,
 			"pageNumber": page_number,
 			"query": [
-				{
-					"fields": ["owner"],
-					"type": "EXACT",
-					"value": "group"
-				},
-				{
-					"fields": ["ownerId"],
-					"type": "EXACT",
-					"value": mailbox_id
-				}
+				{"fields": ["owner"], "type": "EXACT", "value": "group"},
+				{"fields": ["ownerId"], "type": "EXACT", "value": mailbox_id}
 			]
 		}
 
 		app.logger.info(f"Fetching voicemails for group {mailbox_id} via POST search...")
-
 		total_expected = None
 
 		while True:
 			search_body["pageNumber"] = page_number
-
 			data, error = make_api_request(url, access_token, method='POST', data=search_body)
 
 			if error:
@@ -420,7 +367,6 @@ def get_all_voicemails(access_token, region_host, user_id=None, mailbox_type='us
 				app.logger.info(f"API reports {total_expected} total group voicemails")
 
 			page_count = data.get('pageCount', 0)
-
 			if page_number >= page_count or not results:
 				break
 
@@ -430,18 +376,15 @@ def get_all_voicemails(access_token, region_host, user_id=None, mailbox_type='us
 	else:
 		return None, f"Invalid mailbox_type: {mailbox_type}"
 
-	# Post-processing: deduplicate, filter deleted, and sort
+	# Deduplicate, filter deleted, sort
 	unique_map = {v['id']: v for v in all_entities}
 	unique_entities = list(unique_map.values())
-
 	active_voicemails = [v for v in unique_entities if not v.get('deleted', False)]
-
 	active_voicemails.sort(key=lambda vm: vm.get('createdDate', ''), reverse=True)
 
 	app.logger.info(
 		f"Fetch Complete ({mailbox_type}): {len(all_entities)} raw, "
-		f"{len(unique_entities)} unique, "
-		f"{len(active_voicemails)} active."
+		f"{len(unique_entities)} unique, {len(active_voicemails)} active."
 	)
 
 	return active_voicemails, None
@@ -494,9 +437,7 @@ def search_groups(access_token, region_host, query):
 	return data.get('results', []), None
 
 def get_user_groups(access_token, region_host):
-	"""
-	Fetch all groups that the current user is a member of.
-	"""
+	"""Fetch all groups that the current user is a member of."""
 	url = f"https://api.{region_host}/api/v2/users/me?expand=groups"
 	
 	data, error = make_api_request(url, access_token)
@@ -508,13 +449,11 @@ def get_user_groups(access_token, region_host):
 	if not data:
 		return [], None
 	
-	# Groups only have id and selfUri - need to fetch details
 	group_refs = data.get('groups', [])
 	
 	if not group_refs:
 		return [], None
 	
-	# Fetch full details for each group
 	detailed_groups = []
 	for group_ref in group_refs:
 		group_id = group_ref.get('id')
@@ -535,19 +474,26 @@ def get_user_groups(access_token, region_host):
 				'memberCount': group_data.get('memberCount', 0)
 			})
 
-		time.sleep(API_DELAY_GROUP_FETCH)  # Rate limit protection
+		time.sleep(API_DELAY_GROUP_FETCH)
 	
 	app.logger.info(f"Fetched details for {len(detailed_groups)} groups")
 	return detailed_groups, None
 
 # ============================================================================
-# OPTIMIZED BATCH PROCESSOR
+# BATCH PROCESSOR - 3 PHASE FORWARD
 # ============================================================================
 
 def process_voicemails_in_batches(access_token, region_host, voicemails_data, operation, 
 								   target_id=None, target_type='user', progress_id=None):
 	"""
-	voicemails_data: list of dicts with 'id', 'createdDate', 'callerName', 'conversation' from search results
+	Process voicemails for forward or delete operations.
+	
+	For forward: 3-phase approach
+	  Phase 1: Prepare dictionary (conversation_id -> createdDate)
+	  Phase 2: Populate datatable row by row
+	  Phase 3: Forward messages
+	
+	For delete: Simple sequential delete
 	"""
 	app.logger.info(f"=== BATCH {operation.upper()} START ===")
 	app.logger.info(f"Input VMs: {len(voicemails_data)}")
@@ -563,45 +509,62 @@ def process_voicemails_in_batches(access_token, region_host, voicemails_data, op
 	if len(unique_vms) != len(voicemails_data):
 		app.logger.warning(f"Removed {len(voicemails_data) - len(unique_vms)} duplicates")
 	
-	results = {'success': 0, 'failed': 0, 'errors': [], 'total': len(unique_vms), 'processed': 0}
 	total = len(unique_vms)
+	results = {'success': 0, 'failed': 0, 'errors': [], 'total': total, 'processed': 0}
 	
 	if progress_id:
 		progress_data[progress_id] = {'processed': 0, 'total': total, 'success': 0, 'failed': 0, 'status': 'processing'}
 	
-	# For forward: bulk save date mappings FIRST
-	if operation == 'forward' and DATATABLE_ID:
-		date_mappings = []
+	if operation == 'forward':
+		# ========== PHASE 1: Prepare dictionary ==========
+		app.logger.info("Phase 1: Preparing conversation_id -> createdDate dictionary...")
+		
+		date_dict = {}
 		for vm in unique_vms:
 			conversation_id = vm.get('conversation', {}).get('id')
-			original_created = vm.get('createdDate')
-			if conversation_id and original_created:
-				date_mappings.append({
-					'conversation_id': conversation_id,
-					'original_date': original_created
-				})
+			created_date = vm.get('createdDate')
+			
+			if conversation_id and created_date:
+				date_dict[conversation_id] = created_date
 		
-		if date_mappings:
-			app.logger.info(f"Bulk saving {len(date_mappings)} date mappings before forward...")
-			bulk_result = bulk_save_original_dates(access_token, region_host, DATATABLE_ID, date_mappings)
-			if not bulk_result:
-				app.logger.warning("Bulk date save failed, continuing with forward anyway")
-	
-	# Process each voicemail
-	for i, vm in enumerate(unique_vms):
-		if i > 0 and i % (BATCH_SIZE * SUPER_BATCH_SIZE) == 0:
-			app.logger.info(f"Super batch break at item {i}, sleeping {SUPER_BATCH_DELAY}s...")
-			time.sleep(SUPER_BATCH_DELAY)
+		app.logger.info(f"Phase 1 complete: {len(date_dict)} entries prepared")
 		
-		vm_id = vm['id']
-		success = False
-		msg = ""
+		# ========== PHASE 2: Populate datatable ==========
+		if DATATABLE_ID and date_dict:
+			app.logger.info(f"Phase 2: Populating datatable with {len(date_dict)} entries...")
+			
+			for i, (conv_id, created_date) in enumerate(date_dict.items()):
+				success, error = save_original_date(access_token, region_host, DATATABLE_ID, conv_id, created_date)
+				
+				if not success:
+					error_msg = f"Datatable write failed for {conv_id[:8]}: {error}"
+					app.logger.error(error_msg)
+					results['failed'] = total
+					results['errors'].append(error_msg)
+					
+					if progress_id:
+						progress_data[progress_id]['status'] = 'failed'
+						progress_data[progress_id]['failed'] = total
+					
+					app.logger.info("=== BATCH FORWARD ABORTED (Phase 2 failure) ===")
+					return results
+				
+				if (i + 1) % 50 == 0:
+					app.logger.info(f"Phase 2 progress: {i + 1}/{len(date_dict)} datatable entries written")
+				
+				time.sleep(API_DELAY_DATATABLE)
+			
+			app.logger.info(f"Phase 2 complete: All {len(date_dict)} datatable entries written")
+		else:
+			app.logger.info("Phase 2 skipped: No DATATABLE_ID configured or no entries to write")
 		
-		try:
-			if operation == 'forward':
-				original_created = vm.get('createdDate')
-				original_caller_name = vm.get('callerName', 'Unknown')
-
+		# ========== PHASE 3: Forward messages ==========
+		app.logger.info(f"Phase 3: Forwarding {total} messages...")
+		
+		for i, vm in enumerate(unique_vms):
+			vm_id = vm['id']
+			
+			try:
 				url = f"https://api.{region_host}/api/v2/voicemail/messages"
 				body = {"voicemailMessageId": vm_id}
 				
@@ -610,52 +573,70 @@ def process_voicemails_in_batches(access_token, region_host, voicemails_data, op
 				else:
 					body["userId"] = target_id
 				
-				if original_created:
-					body["callerAddress"] = f"[{original_created}] {original_caller_name}"
-				
 				response_data, err = make_api_request(url, access_token, 'POST', body)
-				success = (err is None)
-				msg = err
 				
-				if success and response_data:
-					new_id = response_data.get('id', 'unknown')
-					app.logger.debug(f"Forward OK: {vm_id[:8]} -> new ID: {new_id[:8] if new_id != 'unknown' else 'unknown'}")
-				elif not success:
-					app.logger.error(f"Forward FAIL: {vm_id[:8]} - {msg}")
+				if err:
+					results['failed'] += 1
+					results['errors'].append(f"VM {vm_id[:8]}: {err}")
+					app.logger.error(f"Forward FAIL: {vm_id[:8]} - {err}")
+				else:
+					results['success'] += 1
+					new_id = response_data.get('id', 'unknown') if response_data else 'unknown'
+					app.logger.debug(f"Forward OK: {vm_id[:8]} -> {new_id[:8] if new_id != 'unknown' else 'unknown'}")
+					
+			except Exception as e:
+				results['failed'] += 1
+				results['errors'].append(f"VM {vm_id[:8]}: {str(e)}")
+				app.logger.exception(f"Exception forwarding {vm_id[:8]}: {e}")
 			
-			elif operation == 'delete':
+			results['processed'] += 1
+			
+			if progress_id:
+				progress_data[progress_id].update({
+					'processed': results['processed'],
+					'success': results['success'],
+					'failed': results['failed']
+				})
+			
+			if (i + 1) % 50 == 0:
+				app.logger.info(f"Phase 3 progress: {i + 1}/{total} - Success: {results['success']}, Failed: {results['failed']}")
+			
+			time.sleep(API_DELAY_WRITE)
+	
+	elif operation == 'delete':
+		# Simple sequential delete
+		for i, vm in enumerate(unique_vms):
+			vm_id = vm['id']
+			
+			try:
 				url = f"https://api.{region_host}/api/v2/voicemail/messages/{vm_id}"
 				_, err = make_api_request(url, access_token, 'DELETE')
-				success = (err is None)
-				msg = err
 				
-				if not success:
-					app.logger.error(f"Delete FAIL: {vm_id[:8]} - {msg}")
-			
-			if success:
-				results['success'] += 1
-			else:
+				if err:
+					results['failed'] += 1
+					results['errors'].append(f"VM {vm_id[:8]}: {err}")
+					app.logger.error(f"Delete FAIL: {vm_id[:8]} - {err}")
+				else:
+					results['success'] += 1
+					
+			except Exception as e:
 				results['failed'] += 1
-				results['errors'].append(f"VM {vm_id[:8]}: {msg}")
-				
-		except Exception as e:
-			results['failed'] += 1
-			results['errors'].append(f"VM {vm_id[:8]}: {str(e)}")
-			app.logger.exception(f"Exception processing {vm_id[:8]}: {e}")
+				results['errors'].append(f"VM {vm_id[:8]}: {str(e)}")
+				app.logger.exception(f"Exception deleting {vm_id[:8]}: {e}")
 			
-		results['processed'] += 1
-		
-		if progress_id:
-			progress_data[progress_id].update({
-				'processed': results['processed'],
-				'success': results['success'],
-				'failed': results['failed']
-			})
-		
-		if (i + 1) % 50 == 0:
-			app.logger.info(f"Progress: {i+1}/{total} - Success: {results['success']}, Failed: {results['failed']}")
+			results['processed'] += 1
 			
-		time.sleep(API_DELAY_WRITE)
+			if progress_id:
+				progress_data[progress_id].update({
+					'processed': results['processed'],
+					'success': results['success'],
+					'failed': results['failed']
+				})
+			
+			if (i + 1) % 50 == 0:
+				app.logger.info(f"Delete progress: {i + 1}/{total} - Success: {results['success']}, Failed: {results['failed']}")
+			
+			time.sleep(API_DELAY_WRITE)
 	
 	if progress_id:
 		progress_data[progress_id]['status'] = 'complete'
@@ -669,22 +650,14 @@ def process_voicemails_in_batches(access_token, region_host, voicemails_data, op
 # ============================================================================
 
 def format_voicemail(vm, access_token, region_host, load_original_dates=False):
-	"""Format voicemail with full date and forwarding info
-	
-	Args:
-		vm: Voicemail data dict
-		access_token: OAuth bearer token
-		region_host: API region host
-		load_original_dates: If True, fetch original dates from data table (slow, causes rate limits)
-	"""
+	"""Format voicemail with full date and forwarding info"""
 	created = vm.get('createdDate', '')
 	modified = vm.get('modifiedDate', '')
 	
-	# Original caller info
 	caller_name = vm.get('callerName', '')
 	caller_address = vm.get('callerAddress', '')
 	
-	# Parse embedded original timestamp
+	# Parse embedded original timestamp (legacy support)
 	embedded_date = None
 	source_field = caller_name if caller_name else caller_address
 
@@ -698,7 +671,6 @@ def format_voicemail(vm, access_token, region_host, load_original_dates=False):
 
 	original_caller = caller_name if caller_name else source_field if source_field else 'Unknown'
 	
-	# Forwarding Info (Received Side)
 	copied_from = vm.get('copiedFrom')
 	is_forwarded = copied_from is not None
 	forwarded_by = None
@@ -710,31 +682,26 @@ def format_voicemail(vm, access_token, region_host, load_original_dates=False):
 		copied_from_user = copied_from.get('user', {})
 		forwarded_by = copied_from_user.get('name', 'Unknown')
 		
-		# Fallback chain: embedded -> copiedFrom.date
+		# Fallback chain: embedded -> copiedFrom.date -> datatable
 		original_date = embedded_date if embedded_date else copied_from.get('date')
 		
-		# ONLY fetch data table if explicitly requested AND no fallback worked
 		if load_original_dates and not original_date and conversation_id and DATATABLE_ID:
 			original_date = get_original_date(access_token, region_host, DATATABLE_ID, conversation_id)
-			time.sleep(API_DELAY_DATATABLE)  # Rate limit protection
+			time.sleep(API_DELAY_DATATABLE)
 
-	# Forwarding Info (Sent Side - LATEST ONLY)
 	copied_to = vm.get('copiedTo', [])
 	forwarded_to_name = None
 	forwarded_status_date = None
 
 	if copied_to:
-		# 1. Sort by date descending (Newest first)
 		copied_to.sort(key=lambda x: x.get('date', ''), reverse=True)
 		latest_forward = copied_to[0]
 
-		# 2. Extract Name
 		if latest_forward.get('group'):
 			forwarded_to_name = latest_forward['group'].get('name')
 		elif latest_forward.get('user'):
 			forwarded_to_name = latest_forward['user'].get('name')
 		
-		# 3. Extract Date
 		raw_fw_date = latest_forward.get('date')
 		if raw_fw_date:
 			forwarded_status_date = format_datetime(raw_fw_date)
@@ -754,11 +721,10 @@ def format_voicemail(vm, access_token, region_host, load_original_dates=False):
 		'read': vm.get('read', False),
 		'is_forwarded': is_forwarded,
 		'forwarded_by': forwarded_by,
-		# Updated Fields for User View
 		'forwarded_to': forwarded_to_name,
 		'forwarded_status_date': forwarded_status_date,
 		'filename': format_filename(vm),
-		'conversation_id': conversation_id,  # Add for frontend use
+		'conversation_id': conversation_id,
 	}
 
 def format_filename(voicemail):
@@ -768,7 +734,6 @@ def format_filename(voicemail):
 	created_date = voicemail.get('createdDate', '')
 	modified_date = voicemail.get('modifiedDate', '')
 	
-	# Format created date
 	created_str = 'unknown'
 	if created_date:
 		try:
@@ -777,7 +742,6 @@ def format_filename(voicemail):
 		except:
 			pass
 	
-	# Format modified date if different from created
 	modified_str = None
 	if modified_date and modified_date != created_date:
 		try:
@@ -786,12 +750,9 @@ def format_filename(voicemail):
 		except:
 			pass
 	
-	# Safe caller name
 	safe_caller = ''.join(c if c.isalnum() or c in ' -_' else '_' for c in str(caller_name))[:30]
 	
-	# Build filename
 	if modified_str and modified_str != created_str:
-		# Format: created_modified_caller_id.wav
 		return f"{created_str}_fwd{modified_str}_{safe_caller}_{msg_id[:8]}.wav"
 	else:
 		return f"{created_str}_{safe_caller}_{msg_id[:8]}.wav"
@@ -828,86 +789,6 @@ def cleanup_old_exports():
 				shutil.rmtree(item_path, ignore_errors=True)
 	except Exception as e:
 		app.logger.error(f"Cleanup error: {e}")
-
-# ============================================================================
-# NEW HELPER: BULK IMPORT FOR DATA TABLES
-# ============================================================================
-
-def bulk_save_original_dates(access_token, region_host, datatable_id, date_mappings):
-    """
-    Bulk save original dates using import job.
-    date_mappings: list of {"conversation_id": "...", "original_date": "..."}
-    """
-    if not date_mappings or not datatable_id:
-        return True
-    
-    # Step 1: Create import job
-    job_url = f"https://api.{region_host}/api/v2/flows/datatables/{datatable_id}/import/jobs"
-    job_body = {"importMode": "Append"}
-    
-    job_data, error = make_api_request(job_url, access_token, method='POST', data=job_body)
-    if error:
-        app.logger.error(f"Failed to create import job: {error}")
-        return False
-    
-    upload_uri = job_data.get('uploadURI')
-    upload_headers = job_data.get('uploadHeaders', {})
-    job_id = job_data.get('id')
-    
-    if not upload_uri:
-        app.logger.error("No uploadURI in job response")
-        return False
-    
-    # Step 2: Build CSV content
-    csv_buffer = io.StringIO()
-    csv_buffer.write("key,originalCreatedDate\n")
-    for mapping in date_mappings:
-        csv_buffer.write(f"{mapping['conversation_id']},{mapping['original_date']}\n")
-    csv_content = csv_buffer.getvalue()
-    
-    # Step 3: Upload CSV via POST multipart form-data
-    try:
-        headers = {'Authorization': f'Bearer {access_token}'}
-        headers.update(upload_headers)
-        
-        files = {'file': ('import.csv', csv_content, 'text/csv')}
-        
-        response = requests.post(upload_uri, headers=headers, files=files, timeout=60)
-        response.raise_for_status()
-        app.logger.info(f"CSV uploaded successfully for {len(date_mappings)} rows")
-        
-    except Exception as e:
-        app.logger.error(f"CSV upload error: {e}")
-        if hasattr(e, 'response') and e.response is not None:
-            app.logger.error(f"Response: {e.response.text}")
-        return False
-    
-    # Step 4: Poll for job completion
-    status_url = f"https://api.{region_host}/api/v2/flows/datatables/{datatable_id}/import/jobs/{job_id}"
-    max_polls = 60
-    poll_interval = 2
-    
-    for _ in range(max_polls):
-        time.sleep(poll_interval)
-        status_data, status_error = make_api_request(status_url, access_token)
-        
-        if status_error:
-            app.logger.error(f"Job status poll error: {status_error}")
-            return False
-        
-        status = status_data.get('status')
-        app.logger.debug(f"Import job status: {status}")
-        
-        if status == 'Succeeded':
-            app.logger.info(f"Import complete: {status_data.get('countRecordsUpdated', 0)} updated, {status_data.get('countRecordsFailed', 0)} failed")
-            return True
-        elif status == 'Failed':
-            error_info = status_data.get('errorInformation', {})
-            app.logger.error(f"Import failed: {error_info}")
-            return False
-    
-    app.logger.error("Import job timed out")
-    return False
 
 # ============================================================================
 # FLASK ROUTES
@@ -969,7 +850,6 @@ def callback():
 	if user:
 		session['user_info'] = user
 
-		# Cache user groups at login time to avoid repeated API calls
 		user_groups, groups_error = get_user_groups(token, session.get('region_host'))
 		if groups_error:
 			app.logger.warning(f"Error fetching groups at login: {groups_error}")
@@ -986,19 +866,12 @@ def dashboard():
 	token = session.get('access_token')
 	host = session.get('region_host')
 
-	# Initialize default mailbox if not set
 	initialize_default_mailbox()
-
-	# Get cached user groups from session
 	user_groups = get_cached_user_groups()
-
-	# Get current mailbox
 	current_mailbox = get_current_mailbox()
 
-	# Fetch voicemails for the selected mailbox
 	voicemails, error = get_all_voicemails(
-		token,
-		host,
+		token, host,
 		mailbox_type=current_mailbox['type'],
 		mailbox_id=current_mailbox['id']
 	)
@@ -1009,7 +882,6 @@ def dashboard():
 
 	formatted = [format_voicemail(vm, token, host, load_original_dates=False) for vm in voicemails]
 	preview = formatted[:20]
-
 	total_sec = sum(vm.get('audioRecordingDurationSeconds', 0) or 0 for vm in voicemails)
 
 	return render_template('dashboard.html',
@@ -1060,16 +932,10 @@ def download_page():
 		flash('Download functionality is currently disabled.', 'warning')
 		return redirect(url_for('dashboard'))
 
-	# Initialize default mailbox if not set
 	initialize_default_mailbox()
-
-	# Get cached user groups from session
 	user_groups = get_cached_user_groups()
-
-	# Get current mailbox
 	current_mailbox = get_current_mailbox()
 
-	# Fetch voicemails for the selected mailbox
 	voicemails, _ = get_all_voicemails(
 		session.get('access_token'),
 		session.get('region_host'),
@@ -1091,16 +957,10 @@ def download_page():
 @app.route('/forward')
 @login_required
 def forward_page():
-	# Initialize default mailbox if not set
 	initialize_default_mailbox()
-
-	# Get cached user groups from session
 	user_groups = get_cached_user_groups()
-
-	# Get current mailbox
 	current_mailbox = get_current_mailbox()
 
-	# Fetch voicemails for the selected mailbox
 	voicemails, _ = get_all_voicemails(
 		session.get('access_token'),
 		session.get('region_host'),
@@ -1120,16 +980,10 @@ def forward_page():
 @app.route('/delete')
 @login_required
 def delete_page():
-	# Initialize default mailbox if not set
 	initialize_default_mailbox()
-
-	# Get cached user groups from session
 	user_groups = get_cached_user_groups()
-
-	# Get current mailbox
 	current_mailbox = get_current_mailbox()
 
-	# Fetch voicemails for the selected mailbox
 	voicemails, _ = get_all_voicemails(
 		session.get('access_token'),
 		session.get('region_host'),
@@ -1153,7 +1007,6 @@ def api_forward():
 	data = request.get_json()
 	ids = data.get('voicemail_ids', [])
 	
-	# Fetch full voicemail data for selected IDs
 	all_vms, _ = get_all_voicemails(
 		session.get('access_token'),
 		session.get('region_host'),
@@ -1161,7 +1014,6 @@ def api_forward():
 		mailbox_id=get_current_mailbox()['id']
 	)
 	
-	# Filter to only selected IDs
 	selected_vms = [vm for vm in (all_vms or []) if vm['id'] in ids]
 	
 	res = process_voicemails_in_batches(
@@ -1177,7 +1029,6 @@ def api_delete():
 	data = request.get_json()
 	ids = data.get('voicemail_ids', [])
 	
-	# For delete, we only need IDs - create minimal vm objects
 	vms_data = [{'id': vm_id} for vm_id in ids]
 	
 	res = process_voicemails_in_batches(
@@ -1206,14 +1057,12 @@ def api_switch_mailbox():
 	mailbox_id = data.get('id')
 	mailbox_name = data.get('name')
 
-	# Validate input
 	if not mailbox_type or mailbox_type not in ['user', 'group']:
 		return jsonify({'success': False, 'error': 'Invalid mailbox type'}), 400
 
 	if not mailbox_id or not mailbox_name:
 		return jsonify({'success': False, 'error': 'Missing mailbox id or name'}), 400
 
-	# Set the mailbox in session
 	set_current_mailbox(mailbox_type, mailbox_id, mailbox_name)
 
 	return jsonify({'success': True})
@@ -1221,10 +1070,7 @@ def api_switch_mailbox():
 @app.route('/api/load-original-dates', methods=['POST'])
 @login_required
 def load_original_dates():
-	"""
-	Load original dates from data table for specific voicemails.
-	Intended for group mailbox view where users want accurate original timestamps.
-	"""
+	"""Load original dates from data table for specific voicemails."""
 	data = request.get_json()
 	conversation_ids = data.get('conversation_ids', [])
 	
@@ -1234,7 +1080,6 @@ def load_original_dates():
 	if not conversation_ids:
 		return jsonify({'success': False, 'error': 'No conversation IDs provided'}), 400
 	
-	# Limit to prevent abuse
 	if len(conversation_ids) > 2000:
 		return jsonify({'success': False, 'error': 'Too many IDs (max 2000)'}), 400
 	
@@ -1256,7 +1101,6 @@ def load_original_dates():
 		else:
 			failed += 1
 		
-		# Rate limiting
 		time.sleep(API_DELAY_DATATABLE)
 	
 	app.logger.info(f"Loaded {fetched} original dates, {failed} not found")
@@ -1276,7 +1120,7 @@ def logout():
 
 @app.route('/health')
 def health():
-	return jsonify({'status': 'healthy', 'version': 'v19-lazy-loading'})
+	return jsonify({'status': 'healthy', 'version': 'v20-3phase-forward'})
 
 @app.route('/documentation')
 def documentation():
