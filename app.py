@@ -537,17 +537,20 @@ def process_voicemails_in_batches(access_token, region_host, voicemails_data, op
 				success, error = save_original_date(access_token, region_host, DATATABLE_ID, conv_id, created_date)
 				
 				if not success:
-					error_msg = f"Datatable write failed for {conv_id[:8]}: {error}"
-					app.logger.error(error_msg)
-					results['failed'] = total
-					results['errors'].append(error_msg)
-					
-					if progress_id:
-						progress_data[progress_id]['status'] = 'failed'
-						progress_data[progress_id]['failed'] = total
-					
-					app.logger.info("=== BATCH FORWARD ABORTED (Phase 2 failure) ===")
-					return results
+					if "not unique" in str(error).lower() or "duplicate" in str(error).lower():
+						app.logger.debug(f"Datatable row exists for {conv_id[:8]}, skipping")
+					else:
+						error_msg = f"Datatable write failed for {conv_id[:8]}: {error}"
+						app.logger.error(error_msg)
+						results['failed'] = total
+						results['errors'].append(error_msg)
+						
+						if progress_id:
+							progress_data[progress_id]['status'] = 'failed'
+							progress_data[progress_id]['failed'] = total
+						
+						app.logger.info("=== BATCH FORWARD ABORTED (Phase 2 failure) ===")
+						return results
 				
 				if (i + 1) % 50 == 0:
 					app.logger.info(f"Phase 2 progress: {i + 1}/{len(date_dict)} datatable entries written")
