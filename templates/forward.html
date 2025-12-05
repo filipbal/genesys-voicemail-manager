@@ -367,7 +367,7 @@ function loadOriginalDates() {
 			});
 		});
 		
-		status.innerHTML = `<i class="bi bi-check-circle-fill text-success me-1"></i>Loaded ${data.fetched} dates${data.failed > 0 ? ', ' + data.failed + ' not found' : ''}`;
+		status.innerHTML = `<i class="bi bi-check-circle-fill text-success me-1"></i>Loaded ${data.fetched} dates for ${data.total} voicemails`;
 		status.classList.add('text-success');
 		btn.remove();
 	})
