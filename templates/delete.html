@@ -341,14 +341,15 @@ function loadOriginalDates() {
 		
 		// Update table cells with loaded dates
 		Object.entries(data.dates).forEach(([convId, date]) => {
-			const row = document.querySelector(`.voicemail-row[data-conversation-id="${convId}"]`);
-			if (row) {
+			// Find ALL rows with this conversation_id
+			const rows = document.querySelectorAll(`.voicemail-row[data-conversation-id="${convId}"]`);
+			rows.forEach(row => {
 				const cell = row.querySelector('.original-date-cell');
 				if (cell) {
 					const formatted = formatDate(date);
 					cell.innerHTML = `<small class="text-success">${formatted}</small>`;
 				}
-			}
+			});
 		});
 		
 		status.innerHTML = `<i class="bi bi-check-circle-fill text-success me-1"></i>Loaded ${data.fetched} dates${data.failed > 0 ? ', ' + data.failed + ' not found' : ''}`;
