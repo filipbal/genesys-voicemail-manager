@@ -42,20 +42,20 @@ import csv
 app = Flask(__name__)
 
 def start_keepalive_loop():
-    """Ping /health every 12 minutes to prevent spin down"""
-    def keepalive_worker():
-        while True:
-            time.sleep(720)  # 12 minutes
-            try:
-                url = os.environ.get('RENDER_EXTERNAL_URL', 'http://127.0.0.1:5000')
-                urllib.request.urlopen(f"{url}/health", timeout=10)
-                app.logger.info("Keepalive ping sent")
-            except Exception as e:
-                app.logger.warning(f"Keepalive failed: {e}")
-    
-    if os.environ.get('RENDER_EXTERNAL_URL'):  # Only on Render
-        threading.Thread(target=keepalive_worker, daemon=True).start()
-        app.logger.info("Keepalive loop started")
+	"""Ping /health every 12 minutes to prevent spin down"""
+	def keepalive_worker():
+		while True:
+			time.sleep(720)  # 12 minutes
+			try:
+				url = os.environ.get('RENDER_EXTERNAL_URL', 'http://127.0.0.1:5000')
+				urllib.request.urlopen(f"{url}/health", timeout=10)
+				app.logger.info("Keepalive ping sent")
+			except Exception as e:
+				app.logger.warning(f"Keepalive failed: {e}")
+	
+	if os.environ.get('RENDER_EXTERNAL_URL'):  # Only on Render
+		threading.Thread(target=keepalive_worker, daemon=True).start()
+		app.logger.info("Keepalive loop started")
 
 start_keepalive_loop()
 
@@ -1106,13 +1106,16 @@ def load_original_dates():
 	access_token = session.get('access_token')
 	region_host = session.get('region_host')
 	
+	# Deduplicate conversation IDs to avoid fetching the same date multiple times
+	unique_conv_ids = list(set(conversation_ids))
+	
 	results = {}
 	fetched = 0
 	failed = 0
 	
-	app.logger.info(f"Loading original dates for {len(conversation_ids)} conversations...")
+	app.logger.info(f"Loading original dates for {len(unique_conv_ids)} unique conversations (from {len(conversation_ids)} total)...")
 	
-	for conv_id in conversation_ids:
+	for conv_id in unique_conv_ids:
 		original_date = get_original_date(access_token, region_host, DATATABLE_ID, conv_id)
 		
 		if original_date:
@@ -1130,7 +1133,7 @@ def load_original_dates():
 		'dates': results,
 		'fetched': fetched,
 		'failed': failed,
-		'total': len(conversation_ids)
+		'total': len(unique_conv_ids)
 	})
 
 @app.route('/logout')
