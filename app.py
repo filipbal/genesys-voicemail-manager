@@ -96,7 +96,7 @@ API_PAGE_SIZE = 100
 # PROACTIVE DELAYS (Seconds)
 API_DELAY_GET = 0.3
 API_DELAY_WRITE = 0.5
-API_DELAY_DATATABLE = 0.25  # 240/min, safe buffer under 300/min limit
+API_DELAY_DATATABLE = 0.025  # 240/min, safe buffer under 300/min limit
 API_DELAY_GROUP_FETCH = 0.5
 
 # Batch settings
