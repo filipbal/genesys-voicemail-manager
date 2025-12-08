@@ -149,7 +149,7 @@
 								   onchange="toggleSelectAll(this)">
 						</th>
 						<th scope="col">#</th>
-						<th scope="col">VM ID</th>
+						<th scope="col">Conversation ID</th>
 						<th scope="col">Original Caller</th>
 						{% if current_mailbox.type == 'group' %}
 						<th scope="col">Forwarded By</th>
@@ -178,8 +178,8 @@
 							<input type="checkbox" class="form-check-input voicemail-checkbox"
 								   value="{{ vm.id }}" data-caller="{{ vm.original_caller }}">
 						</td>
-						<td>{{ loop.index }}</td>
-						<td><code>{{ vm.id_short }}</code></td>
+						<td class="row-number-cell">{{ loop.index }}</td>
+						<td><code>{{ (vm.conversation_id or vm.id)[:8] }}</code></td>
 						<td>
 							{{ vm.original_caller }}
 							{% if current_mailbox.type != 'group' and vm.is_forwarded %}
@@ -226,7 +226,7 @@
 						</td>
 						<td class="text-center">
 							<button type="button" class="btn btn-sm btn-outline-primary btn-play"
-									onclick="playVoicemail('{{ vm.id }}', '{{ vm.original_caller|e }}', '{{ vm.duration }}', '{{ vm.created_date }}')"
+									onclick="playVoicemail('{{ vm.id }}', '{{ vm.original_caller|e }}', '{{ vm.duration }}', '{{ vm.conversation_id or '' }}')"
 									title="Play">
 								<i class="bi bi-play-fill"></i>
 							</button>
@@ -331,6 +331,9 @@ const BATCH_SIZE = {{ batch_size }};
 let searchTimeout = null;
 let selectedTarget = null;
 
+// Global storage for loaded original dates (accessible from base.html playVoicemail)
+window.loadedOriginalDates = window.loadedOriginalDates || {};
+
 // Auto-load original dates for group mailbox on page load
 {% if current_mailbox.type == 'group' %}
 (function() {
@@ -356,6 +359,9 @@ let selectedTarget = null;
 			console.error('Failed to load original dates:', data.error);
 			return;
 		}
+
+		// Store dates globally for playVoicemail popup
+		Object.assign(window.loadedOriginalDates, data.dates);
 
 		Object.entries(data.dates).forEach(([convId, date]) => {
 			const rows = document.querySelectorAll(`.voicemail-row[data-conversation-id="${convId}"]`);
