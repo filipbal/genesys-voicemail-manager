@@ -104,6 +104,68 @@
                 font-size: 0.875rem;
             }
         }
+
+        /* Audio Player Styles */
+        .audio-player-modal .modal-body {
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+        }
+
+        .audio-player-info {
+            background: white;
+            border-radius: 0.5rem;
+            padding: 1rem;
+            margin-bottom: 1rem;
+            box-shadow: 0 0.125rem 0.25rem rgba(0,0,0,0.075);
+        }
+
+        .audio-player-info .caller-name {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: var(--secondary-color);
+        }
+
+        .audio-player-info .caller-details {
+            color: #6c757d;
+            font-size: 0.875rem;
+        }
+
+        .audio-controls {
+            background: white;
+            border-radius: 0.5rem;
+            padding: 1rem;
+            box-shadow: 0 0.125rem 0.25rem rgba(0,0,0,0.075);
+        }
+
+        .audio-controls audio {
+            width: 100%;
+            outline: none;
+        }
+
+        .btn-play {
+            padding: 0.25rem 0.5rem;
+            font-size: 0.875rem;
+        }
+
+        /* Forwarded By Filter Styles */
+        .filter-container {
+            background: #f8f9fa;
+            border-radius: 0.375rem;
+            padding: 0.75rem;
+            margin-bottom: 1rem;
+        }
+
+        .filter-container .form-select {
+            max-width: 250px;
+        }
+
+        .filter-badge {
+            font-size: 0.75rem;
+            vertical-align: middle;
+        }
+
+        .voicemail-row.filtered-out {
+            display: none !important;
+        }
     </style>
     
     {% block extra_css %}{% endblock %}
@@ -180,9 +242,232 @@
         </div>
     </footer>
     
+    <!-- Audio Player Modal (Shared) -->
+    <div class="modal fade audio-player-modal" id="audioPlayerModal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header" style="background: linear-gradient(135deg, var(--primary-color) 0%, #e6451c 100%); color: white;">
+                    <h5 class="modal-title">
+                        <i class="bi bi-play-circle me-2"></i>
+                        Play Voicemail
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="audio-player-info">
+                        <div class="d-flex align-items-center">
+                            <div class="flex-shrink-0">
+                                <i class="bi bi-person-circle fs-1 text-muted"></i>
+                            </div>
+                            <div class="flex-grow-1 ms-3">
+                                <div class="caller-name" id="audioPlayerCaller">Loading...</div>
+                                <div class="caller-details">
+                                    <i class="bi bi-clock me-1"></i>
+                                    <span id="audioPlayerDuration">--</span>
+                                    <span class="mx-2">|</span>
+                                    <i class="bi bi-calendar me-1"></i>
+                                    <span id="audioPlayerDate">--</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="audio-controls">
+                        <div id="audioLoading" class="text-center py-3">
+                            <div class="spinner-border text-primary" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                            <p class="mt-2 mb-0 text-muted">Fetching audio...</p>
+                        </div>
+                        <div id="audioPlayerContainer" style="display: none;">
+                            <audio id="audioPlayer" controls preload="metadata">
+                                Your browser does not support the audio element.
+                            </audio>
+                        </div>
+                        <div id="audioError" class="alert alert-danger mb-0" style="display: none;">
+                            <i class="bi bi-exclamation-triangle me-2"></i>
+                            <span id="audioErrorMessage">Failed to load audio</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Bootstrap JS -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
-    
+
+    <!-- Shared Audio Player & Filter JavaScript -->
+    <script>
+    // ============================================
+    // AUDIO PLAYER FUNCTIONALITY
+    // ============================================
+    let currentAudioModal = null;
+
+    function playVoicemail(messageId, caller, duration, date) {
+        // Set info in modal
+        document.getElementById('audioPlayerCaller').textContent = caller || 'Unknown Caller';
+        document.getElementById('audioPlayerDuration').textContent = duration || '--';
+        document.getElementById('audioPlayerDate').textContent = date || '--';
+
+        // Reset state
+        document.getElementById('audioLoading').style.display = 'block';
+        document.getElementById('audioPlayerContainer').style.display = 'none';
+        document.getElementById('audioError').style.display = 'none';
+
+        // Get audio element
+        const audio = document.getElementById('audioPlayer');
+        audio.pause();
+        audio.src = '';
+
+        // Show modal
+        currentAudioModal = new bootstrap.Modal(document.getElementById('audioPlayerModal'));
+        currentAudioModal.show();
+
+        // Fetch fresh media URL
+        fetch(`/api/voicemail/${messageId}/media-url`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.success && data.mediaUrl) {
+                    audio.src = data.mediaUrl;
+                    document.getElementById('audioLoading').style.display = 'none';
+                    document.getElementById('audioPlayerContainer').style.display = 'block';
+
+                    // Auto-play
+                    audio.play().catch(err => {
+                        console.log('Auto-play prevented:', err);
+                        // User can click play manually
+                    });
+                } else {
+                    showAudioError(data.error || 'Failed to get media URL');
+                }
+            })
+            .catch(error => {
+                console.error('Error fetching media URL:', error);
+                showAudioError('Network error - please try again');
+            });
+    }
+
+    function showAudioError(message) {
+        document.getElementById('audioLoading').style.display = 'none';
+        document.getElementById('audioPlayerContainer').style.display = 'none';
+        document.getElementById('audioError').style.display = 'block';
+        document.getElementById('audioErrorMessage').textContent = message;
+    }
+
+    // Stop audio when modal is closed
+    document.getElementById('audioPlayerModal').addEventListener('hidden.bs.modal', function() {
+        const audio = document.getElementById('audioPlayer');
+        audio.pause();
+        audio.src = '';
+    });
+
+    // ============================================
+    // FORWARDED BY FILTER FUNCTIONALITY
+    // ============================================
+    function initForwardedByFilter() {
+        const filterSelect = document.getElementById('forwardedByFilter');
+        if (!filterSelect) return;
+
+        // Collect unique "Forwarded By" values from table
+        const forwardedByValues = new Set();
+        document.querySelectorAll('.voicemail-row').forEach(row => {
+            const forwardedBy = row.dataset.forwardedBy;
+            if (forwardedBy && forwardedBy !== '-' && forwardedBy !== '') {
+                forwardedByValues.add(forwardedBy);
+            }
+        });
+
+        // Sort alphabetically
+        const sortedValues = Array.from(forwardedByValues).sort((a, b) =>
+            a.toLowerCase().localeCompare(b.toLowerCase())
+        );
+
+        // Populate dropdown
+        sortedValues.forEach(value => {
+            const option = document.createElement('option');
+            option.value = value;
+            option.textContent = value;
+            filterSelect.appendChild(option);
+        });
+
+        // Hide filter if no values
+        if (sortedValues.length === 0) {
+            const filterContainer = document.getElementById('forwardedByFilterContainer');
+            if (filterContainer) {
+                filterContainer.style.display = 'none';
+            }
+        }
+    }
+
+    function filterByForwardedBy() {
+        const filterSelect = document.getElementById('forwardedByFilter');
+        if (!filterSelect) return;
+
+        const selectedValue = filterSelect.value;
+        const filterStatus = document.getElementById('filterStatus');
+        let visibleCount = 0;
+        let totalCount = 0;
+
+        document.querySelectorAll('.voicemail-row').forEach(row => {
+            totalCount++;
+            const forwardedBy = row.dataset.forwardedBy || '';
+
+            if (selectedValue === '' || forwardedBy === selectedValue) {
+                row.classList.remove('filtered-out');
+                visibleCount++;
+            } else {
+                row.classList.add('filtered-out');
+            }
+        });
+
+        // Update filter status
+        if (filterStatus) {
+            if (selectedValue === '') {
+                filterStatus.innerHTML = '';
+            } else {
+                filterStatus.innerHTML = `<span class="badge bg-info filter-badge ms-2">Showing ${visibleCount} of ${totalCount}</span>`;
+            }
+        }
+
+        // Update row numbers
+        updateRowNumbers();
+
+        // Update selected count if applicable
+        if (typeof updateSelectedCount === 'function') {
+            updateSelectedCount();
+        }
+    }
+
+    function clearFilter() {
+        const filterSelect = document.getElementById('forwardedByFilter');
+        if (filterSelect) {
+            filterSelect.value = '';
+            filterByForwardedBy();
+        }
+    }
+
+    function updateRowNumbers() {
+        let visibleIndex = 0;
+        document.querySelectorAll('.voicemail-row').forEach(row => {
+            if (!row.classList.contains('filtered-out')) {
+                visibleIndex++;
+                const indexCell = row.querySelector('td:nth-child(2)');
+                if (indexCell) {
+                    indexCell.textContent = visibleIndex;
+                }
+            }
+        });
+    }
+
+    // Initialize filter on page load if container exists
+    document.addEventListener('DOMContentLoaded', function() {
+        initForwardedByFilter();
+    });
+    </script>
+
     {% block extra_js %}{% endblock %}
 </body>
 </html>

@@ -44,6 +44,22 @@
 		</button>
 	</div>
 </div>
+
+<!-- Forwarded By Filter -->
+<div class="filter-container" id="forwardedByFilterContainer">
+	<div class="d-flex align-items-center flex-wrap gap-2">
+		<label for="forwardedByFilter" class="form-label mb-0 fw-semibold">
+			<i class="bi bi-funnel me-1"></i> Filter by Forwarded By:
+		</label>
+		<select id="forwardedByFilter" class="form-select form-select-sm" onchange="filterByForwardedBy()">
+			<option value="">All Users</option>
+		</select>
+		<button type="button" class="btn btn-sm btn-outline-secondary" onclick="clearFilter()">
+			<i class="bi bi-x-lg me-1"></i> Clear
+		</button>
+		<span id="filterStatus"></span>
+	</div>
+</div>
 {% endif %}
 
 <div class="row mb-4">
@@ -167,7 +183,12 @@
 					{% for vm in voicemails %}
 					<tr class="voicemail-row {% if not vm.read %}voicemail-unread{% endif %}"
 						data-conversation-id="{{ vm.conversation_id or '' }}"
-						data-is-forwarded="{{ vm.is_forwarded|lower }}">
+						data-is-forwarded="{{ vm.is_forwarded|lower }}"
+						data-forwarded-by="{{ vm.forwarded_by or '' }}"
+						data-vm-id="{{ vm.id }}"
+						data-vm-caller="{{ vm.original_caller }}"
+						data-vm-duration="{{ vm.duration }}"
+						data-vm-date="{{ vm.created_date }}">
 						<td>{{ loop.index }}</td>
 						<td><code>{{ vm.id_short }}</code></td>
 						<td>
@@ -225,8 +246,13 @@
 						</td>
 						<td class="text-center">
 							<div class="btn-group btn-group-sm">
+								<button type="button" class="btn btn-outline-primary btn-play"
+										onclick="playVoicemail('{{ vm.id }}', '{{ vm.original_caller|e }}', '{{ vm.duration }}', '{{ vm.created_date }}')"
+										title="Play">
+									<i class="bi bi-play-fill"></i>
+								</button>
 								{% if enable_downloads %}
-								<a href="{{ url_for('download_single', message_id=vm.id) }}" 
+								<a href="{{ url_for('download_single', message_id=vm.id) }}"
 								   class="btn btn-outline-success download-btn"
 								   title="Download">
 									<i class="bi bi-download"></i>
@@ -241,7 +267,7 @@
 									<i class="bi bi-forward"></i>
 								</button>
 								<button type="button" class="btn btn-outline-danger"
-										data-bs-toggle="modal" 
+										data-bs-toggle="modal"
 										data-bs-target="#deleteModal"
 										data-vm-id="{{ vm.id }}"
 										data-vm-caller="{{ vm.original_caller }}"

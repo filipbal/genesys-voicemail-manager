@@ -1087,6 +1087,49 @@ def api_switch_mailbox():
 
 	return jsonify({'success': True})
 
+@app.route('/api/voicemail/<message_id>/media-url')
+@login_required
+def get_voicemail_media_url(message_id):
+	"""Get fresh media URL for audio playback. Returns mediaFileUri (temporary pre-signed URL)."""
+	access_token = session.get('access_token')
+	region_host = session.get('region_host')
+
+	url = f"https://api.{region_host}/api/v2/voicemail/messages/{message_id}/media"
+	params = {'formatId': 'WAV'}
+	url_with_params = f"{url}?{urllib.parse.urlencode(params)}"
+
+	req = urllib.request.Request(url_with_params)
+	req.add_header('Authorization', f'Bearer {access_token}')
+
+	try:
+		with urllib.request.urlopen(req, timeout=30) as response:
+			content_type = response.headers.get('Content-Type', '')
+
+			if 'application/json' in content_type:
+				data = json.loads(response.read().decode())
+				if 'mediaFileUri' in data:
+					return jsonify({
+						'success': True,
+						'mediaUrl': data['mediaFileUri']
+					})
+				return jsonify({'success': False, 'error': 'No media URI in response'}), 400
+			else:
+				# API returned direct binary - this shouldn't happen with our request but handle it
+				return jsonify({'success': False, 'error': 'Unexpected response format'}), 400
+
+	except urllib.request.HTTPError as e:
+		error_msg = f"HTTP {e.code}: {e.reason}"
+		try:
+			error_body = json.loads(e.read().decode())
+			error_msg = error_body.get('message', error_msg)
+		except:
+			pass
+		app.logger.error(f"Error getting media URL for {message_id}: {error_msg}")
+		return jsonify({'success': False, 'error': error_msg}), e.code
+	except Exception as e:
+		app.logger.error(f"Error getting media URL for {message_id}: {str(e)}")
+		return jsonify({'success': False, 'error': str(e)}), 500
+
 @app.route('/api/load-original-dates', methods=['POST'])
 @login_required
 def load_original_dates():
