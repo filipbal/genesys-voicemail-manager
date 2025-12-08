@@ -125,7 +125,7 @@
 							<input type="checkbox" class="form-check-input voicemail-checkbox"
 								   value="{{ vm.id }}" data-caller="{{ vm.original_caller }}">
 						</td>
-						<td>{{ loop.index }}</td>
+						<td class="row-number-cell">{{ loop.index }}</td>
 						<td><code>{{ (vm.conversation_id or vm.id)[:8] }}</code></td>
 						<td>
 							{{ vm.original_caller }}

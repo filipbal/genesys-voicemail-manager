@@ -183,7 +183,7 @@
 						data-vm-caller="{{ vm.original_caller }}"
 						data-vm-duration="{{ vm.duration }}"
 						data-vm-date="{{ vm.created_date }}">
-						<td>{{ loop.index }}</td>
+						<td class="row-number-cell">{{ loop.index }}</td>
 						<td><code>{{ (vm.conversation_id or vm.id)[:8] }}</code></td>
 						<td>
 							{{ vm.original_caller }}

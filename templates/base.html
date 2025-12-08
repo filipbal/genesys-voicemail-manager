@@ -470,7 +470,7 @@
         document.querySelectorAll('.voicemail-row').forEach(row => {
             if (!row.classList.contains('filtered-out')) {
                 visibleIndex++;
-                const indexCell = row.querySelector('td:nth-child(2)');
+                const indexCell = row.querySelector('.row-number-cell');
                 if (indexCell) {
                     indexCell.textContent = visibleIndex;
                 }
