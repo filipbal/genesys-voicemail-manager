@@ -41,6 +41,24 @@
 	</div>
 </div>
 
+{% if current_mailbox.type == 'group' %}
+<!-- Forwarded By Filter -->
+<div class="filter-container" id="forwardedByFilterContainer">
+	<div class="d-flex align-items-center flex-wrap gap-2">
+		<label for="forwardedByFilter" class="form-label mb-0 fw-semibold">
+			<i class="bi bi-funnel me-1"></i> Filter by Forwarded By:
+		</label>
+		<select id="forwardedByFilter" class="form-select form-select-sm" onchange="filterByForwardedBy()">
+			<option value="">All Users</option>
+		</select>
+		<button type="button" class="btn btn-sm btn-outline-secondary" onclick="clearFilter()">
+			<i class="bi bi-x-lg me-1"></i> Clear
+		</button>
+		<span id="filterStatus"></span>
+	</div>
+</div>
+{% endif %}
+
 <div class="card mb-4">
 	<div class="card-header d-flex justify-content-between align-items-center bg-success text-white">
 		<h5 class="mb-0">
@@ -80,11 +98,17 @@
 						<th scope="col">Forwarded</th>
 						{% endif %}
 						<th scope="col">Duration</th>
+						<th scope="col" class="text-center" style="width: 60px;">Play</th>
 					</tr>
 				</thead>
 				<tbody>
 					{% for vm in voicemails %}
-					<tr class="voicemail-row">
+					<tr class="voicemail-row"
+						data-forwarded-by="{{ vm.forwarded_by or '' }}"
+						data-vm-id="{{ vm.id }}"
+						data-vm-caller="{{ vm.original_caller }}"
+						data-vm-duration="{{ vm.duration }}"
+						data-vm-date="{{ vm.created_date }}">
 						<td>
 							<input type="checkbox" class="form-check-input voicemail-checkbox"
 								   value="{{ vm.id }}"
@@ -136,6 +160,13 @@
 						<td>
 							<i class="bi bi-clock me-1 text-muted"></i>
 							{{ vm.duration }}
+						</td>
+						<td class="text-center">
+							<button type="button" class="btn btn-sm btn-outline-primary btn-play"
+									onclick="playVoicemail('{{ vm.id }}', '{{ vm.original_caller|e }}', '{{ vm.duration }}', '{{ vm.created_date }}')"
+									title="Play">
+								<i class="bi bi-play-fill"></i>
+							</button>
 						</td>
 					</tr>
 					{% endfor %}
