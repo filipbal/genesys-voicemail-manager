@@ -147,9 +147,16 @@
 	<div class="card-header d-flex justify-content-between align-items-center">
 		<h5 class="mb-0">
 			<i class="bi bi-list-ul me-2"></i>
+			{% if current_mailbox.type == 'group' %}
+			All Voicemails
+			{% if voicemail_count > 0 %}
+			<small class="text-muted ms-2">({{ voicemail_count }} total)</small>
+			{% endif %}
+			{% else %}
 			Recent Voicemails
 			{% if voicemail_count > 0 %}
 			<small class="text-muted ms-2">(showing newest {{ preview_count }} of {{ voicemail_count }} total)</small>
+			{% endif %}
 			{% endif %}
 		</h5>
 		<button class="btn btn-outline-secondary btn-sm" onclick="location.reload()">
@@ -158,9 +165,9 @@
 	</div>
 	<div class="card-body p-0">
 		{% if voicemails %}
-		<div class="table-responsive">
+		<div class="table-responsive"{% if current_mailbox.type == 'group' %} style="max-height: 500px; overflow-y: auto;"{% endif %}>
 			<table class="table table-hover mb-0">
-				<thead class="table-light">
+				<thead class="table-light{% if current_mailbox.type == 'group' %} sticky-top{% endif %}">
 					<tr>
 						<th scope="col">#</th>
 						<th scope="col">VM ID</th>
@@ -282,7 +289,7 @@
 			</table>
 		</div>
 		
-		{% if voicemail_count > preview_count %}
+		{% if is_preview and voicemail_count > preview_count %}
 		<div class="card-footer bg-light">
 			<div class="text-center">
 				<p class="text-muted mb-2">

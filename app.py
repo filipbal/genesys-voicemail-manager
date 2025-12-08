@@ -903,15 +903,23 @@ def dashboard():
 		voicemails = []
 
 	formatted = [format_voicemail(vm, token, host, load_original_dates=False) for vm in voicemails]
-	preview = formatted[:20]
 	total_sec = sum(vm.get('audioRecordingDurationSeconds', 0) or 0 for vm in voicemails)
+
+	# For group mailboxes, show all voicemails; for user mailboxes, show preview of 20
+	if current_mailbox['type'] == 'group':
+		display_voicemails = formatted
+		is_preview = False
+	else:
+		display_voicemails = formatted[:20]
+		is_preview = True
 
 	return render_template('dashboard.html',
 						 user_info=session.get('user_info'),
 						 region=REGIONS.get(session.get('region_key')),
-						 voicemails=preview,
+						 voicemails=display_voicemails,
 						 voicemail_count=len(formatted),
-						 preview_count=len(preview),
+						 preview_count=len(display_voicemails),
+						 is_preview=is_preview,
 						 total_duration_minutes=round(total_sec/60, 1),
 						 enable_downloads=ENABLE_DOWNLOADS,
 						 user_groups=user_groups,
