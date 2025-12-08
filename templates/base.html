@@ -306,11 +306,27 @@
     // ============================================
     let currentAudioModal = null;
 
-    function playVoicemail(messageId, caller, duration, date) {
+    function playVoicemail(messageId, caller, duration, conversationId) {
+        // Look up original date from loaded dates dictionary
+        let displayDate = '--';
+        if (conversationId && window.loadedOriginalDates && window.loadedOriginalDates[conversationId]) {
+            // Use original date from fetched dictionary
+            const isoDate = window.loadedOriginalDates[conversationId];
+            try {
+                const dt = new Date(isoDate);
+                displayDate = dt.toLocaleString('en-US', {
+                    year: 'numeric', month: '2-digit', day: '2-digit',
+                    hour: '2-digit', minute: '2-digit', second: '2-digit'
+                });
+            } catch {
+                displayDate = isoDate;
+            }
+        }
+
         // Set info in modal
         document.getElementById('audioPlayerCaller').textContent = caller || 'Unknown Caller';
         document.getElementById('audioPlayerDuration').textContent = duration || '--';
-        document.getElementById('audioPlayerDate').textContent = date || '--';
+        document.getElementById('audioPlayerDate').textContent = displayDate;
 
         // Reset state
         document.getElementById('audioLoading').style.display = 'block';

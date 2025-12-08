@@ -86,7 +86,7 @@
 								   onchange="toggleSelectAll(this)">
 						</th>
 						<th scope="col">#</th>
-						<th scope="col">VM ID</th>
+						<th scope="col">Conversation ID</th>
 						<th scope="col">Original Caller</th>
 						{% if current_mailbox.type == 'group' %}
 						<th scope="col">Forwarded By</th>
@@ -104,6 +104,8 @@
 				<tbody>
 					{% for vm in voicemails %}
 					<tr class="voicemail-row"
+						data-conversation-id="{{ vm.conversation_id or '' }}"
+						data-is-forwarded="{{ vm.is_forwarded|lower }}"
 						data-forwarded-by="{{ vm.forwarded_by or '' }}"
 						data-vm-id="{{ vm.id }}"
 						data-vm-caller="{{ vm.original_caller }}"
@@ -116,7 +118,7 @@
 								   data-caller="{{ vm.original_caller }}">
 						</td>
 						<td>{{ loop.index }}</td>
-						<td><code>{{ vm.id_short }}</code></td>
+						<td><code>{{ (vm.conversation_id or vm.id)[:8] }}</code></td>
 						<td>
 							{{ vm.original_caller }}
 							{% if current_mailbox.type != 'group' and vm.is_forwarded %}
@@ -129,7 +131,7 @@
 						<td>
 							{{ vm.forwarded_by or '-' }}
 						</td>
-						<td>
+						<td class="original-date-cell">
 							<small>{{ vm.original_date or '-' }}</small>
 						</td>
 						<td>
@@ -163,7 +165,7 @@
 						</td>
 						<td class="text-center">
 							<button type="button" class="btn btn-sm btn-outline-primary btn-play"
-									onclick="playVoicemail('{{ vm.id }}', '{{ vm.original_caller|e }}', '{{ vm.duration }}', '{{ vm.created_date }}')"
+									onclick="playVoicemail('{{ vm.id }}', '{{ vm.original_caller|e }}', '{{ vm.duration }}', '{{ vm.conversation_id or '' }}')"
 									title="Play">
 								<i class="bi bi-play-fill"></i>
 							</button>
@@ -246,6 +248,64 @@ const SUPER_BATCH_DELAY = 10000;
 
 let selectedVoicemails = [];
 let isDownloading = false;
+
+// Global storage for loaded original dates (accessible from base.html playVoicemail)
+window.loadedOriginalDates = window.loadedOriginalDates || {};
+
+// Auto-load original dates for group mailbox on page load
+{% if current_mailbox.type == 'group' %}
+(function() {
+	const conversationIds = [];
+	document.querySelectorAll('.voicemail-row').forEach(row => {
+		const convId = row.dataset.conversationId;
+		const isForwarded = row.dataset.isForwarded === 'true';
+		if (convId && isForwarded) {
+			conversationIds.push(convId);
+		}
+	});
+
+	if (conversationIds.length === 0) return;
+
+	fetch('/api/load-original-dates', {
+		method: 'POST',
+		headers: {'Content-Type': 'application/json'},
+		body: JSON.stringify({conversation_ids: conversationIds})
+	})
+	.then(response => response.json())
+	.then(data => {
+		if (!data.success) {
+			console.error('Failed to load original dates:', data.error);
+			return;
+		}
+
+		// Store dates globally for playVoicemail popup
+		Object.assign(window.loadedOriginalDates, data.dates);
+
+		Object.entries(data.dates).forEach(([convId, date]) => {
+			const rows = document.querySelectorAll(`.voicemail-row[data-conversation-id="${convId}"]`);
+			rows.forEach(row => {
+				const cell = row.querySelector('.original-date-cell');
+				if (cell) {
+					cell.innerHTML = `<small class="text-success">${formatDownloadDate(date)}</small>`;
+				}
+			});
+		});
+	})
+	.catch(error => console.error('Error loading original dates:', error));
+})();
+
+function formatDownloadDate(isoString) {
+	try {
+		const dt = new Date(isoString);
+		return dt.toLocaleString('en-US', {
+			year: 'numeric', month: '2-digit', day: '2-digit',
+			hour: '2-digit', minute: '2-digit', second: '2-digit'
+		});
+	} catch {
+		return isoString;
+	}
+}
+{% endif %}
 
 // Voicemail selection handlers
 document.querySelectorAll('.voicemail-checkbox').forEach(checkbox => {
