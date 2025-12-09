@@ -72,7 +72,6 @@ Genesys Cloud enforces user-level ownership on voicemail media—administrators 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/download/<id>` | GET | Download single voicemail as WAV |
-| `/download-bulk` | POST | Download multiple voicemails as ZIP (accepts JSON with voicemail_ids) |
 | `/api/forward` | POST | Forward voicemails (batch - accepts JSON with voicemail_ids, target_id, target_type) |
 | `/api/delete` | POST | Delete voicemails (batch - accepts JSON with voicemail_ids) |
 
@@ -82,10 +81,11 @@ Genesys Cloud enforces user-level ownership on voicemail media—administrators 
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/voicemails` | GET | List all voicemails (JSON, paginated) |
-| `/api/voicemails/stats` | GET | Get voicemail statistics (JSON) |
-| `/api/search/users` | GET | Search users by name/email |
-| `/api/search/groups` | GET | Search groups by name |
+| `/api/search/users` | GET | Search users by name/email (uses Genesys POST internally) |
+| `/api/search/groups` | GET | Search groups by name (uses Genesys POST internally) |
+| `/api/switch-mailbox` | POST | Switch between user/group mailbox (accepts JSON with type, id, name) |
+| `/api/voicemail/<id>/media-url` | GET | Get temporary media URL for audio playback |
+| `/api/load-original-dates` | POST | Load original dates from datatable (accepts JSON with conversation_ids) |
 
 ### Utility
 
@@ -99,11 +99,15 @@ The application internally makes these calls to Genesys Cloud:
 
 | Genesys API Endpoint | Method | Description |
 |---------------------|--------|-------------|
+| `/api/v2/voicemail/search` | POST | Search voicemails (user or group mailbox) |
 | `/api/v2/voicemail/messages` | POST | Forward/copy a voicemail |
 | `/api/v2/voicemail/messages/{messageId}` | DELETE | Delete a single voicemail |
-| `/api/v2/voicemail/me/messages` | GET | Get user's voicemails |
-| `/api/v2/users/search` | POST | Search users |
-| `/api/v2/groups/search` | POST | Search groups |
+| `/api/v2/voicemail/messages/{messageId}/media` | GET | Get voicemail media URL |
+| `/api/v2/users/me` | GET | Get current user info (with groups expansion) |
+| `/api/v2/users/search` | POST | Search users by name/email |
+| `/api/v2/groups/{groupId}` | GET | Get group details |
+| `/api/v2/groups/search` | POST | Search groups by name |
+| `/api/v2/flows/datatables/{id}/rows` | GET/POST | Read/write original date entries |
 
 ## Troubleshooting
 

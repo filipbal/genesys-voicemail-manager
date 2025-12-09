@@ -367,19 +367,14 @@
                                 <td>Download single voicemail as WAV</td>
                             </tr>
                             <tr>
-                                <td><code>/download-bulk</code></td>
-                                <td><span class="badge bg-warning text-dark">POST</span></td>
-                                <td>Download multiple voicemails as ZIP (accepts JSON payload with voicemail_ids)</td>
-                            </tr>
-                            <tr>
                                 <td><code>/api/forward</code></td>
                                 <td><span class="badge bg-warning text-dark">POST</span></td>
-                                <td>Forward voicemails (batch - accepts JSON payload with voicemail_ids, target_id, target_type)</td>
+                                <td>Forward voicemails (batch - accepts JSON with voicemail_ids, target_id, target_type)</td>
                             </tr>
                             <tr>
                                 <td><code>/api/delete</code></td>
                                 <td><span class="badge bg-warning text-dark">POST</span></td>
-                                <td>Delete voicemails (batch - accepts JSON payload with voicemail_ids)</td>
+                                <td>Delete voicemails (batch - accepts JSON with voicemail_ids)</td>
                             </tr>
                         </tbody>
                     </table>
@@ -397,24 +392,29 @@
                         </thead>
                         <tbody>
                             <tr>
-                                <td><code>/api/voicemails</code></td>
-                                <td><span class="badge bg-success">GET</span></td>
-                                <td>List all voicemails (JSON, paginated)</td>
-                            </tr>
-                            <tr>
-                                <td><code>/api/voicemails/stats</code></td>
-                                <td><span class="badge bg-success">GET</span></td>
-                                <td>Get voicemail statistics (JSON)</td>
-                            </tr>
-                            <tr>
                                 <td><code>/api/search/users</code></td>
                                 <td><span class="badge bg-success">GET</span></td>
-                                <td>Search users by name/email</td>
+                                <td>Search users by name/email (uses Genesys POST internally)</td>
                             </tr>
                             <tr>
                                 <td><code>/api/search/groups</code></td>
                                 <td><span class="badge bg-success">GET</span></td>
-                                <td>Search groups by name</td>
+                                <td>Search groups by name (uses Genesys POST internally)</td>
+                            </tr>
+                            <tr>
+                                <td><code>/api/switch-mailbox</code></td>
+                                <td><span class="badge bg-warning text-dark">POST</span></td>
+                                <td>Switch between user/group mailbox (accepts JSON with type, id, name)</td>
+                            </tr>
+                            <tr>
+                                <td><code>/api/voicemail/&lt;message_id&gt;/media-url</code></td>
+                                <td><span class="badge bg-success">GET</span></td>
+                                <td>Get temporary media URL for audio playback</td>
+                            </tr>
+                            <tr>
+                                <td><code>/api/load-original-dates</code></td>
+                                <td><span class="badge bg-warning text-dark">POST</span></td>
+                                <td>Load original dates from datatable (accepts JSON with conversation_ids)</td>
                             </tr>
                         </tbody>
                     </table>
@@ -453,6 +453,11 @@
                         </thead>
                         <tbody>
                             <tr>
+                                <td><code>/api/v2/voicemail/search</code></td>
+                                <td><span class="badge bg-warning text-dark">POST</span></td>
+                                <td>Search voicemails (user or group mailbox)</td>
+                            </tr>
+                            <tr>
                                 <td><code>/api/v2/voicemail/messages</code></td>
                                 <td><span class="badge bg-warning text-dark">POST</span></td>
                                 <td>Forward/copy a voicemail</td>
@@ -463,19 +468,34 @@
                                 <td>Delete a single voicemail</td>
                             </tr>
                             <tr>
-                                <td><code>/api/v2/voicemail/me/messages</code></td>
+                                <td><code>/api/v2/voicemail/messages/{messageId}/media</code></td>
                                 <td><span class="badge bg-success">GET</span></td>
-                                <td>Get user's voicemails</td>
+                                <td>Get voicemail media URL</td>
+                            </tr>
+                            <tr>
+                                <td><code>/api/v2/users/me</code></td>
+                                <td><span class="badge bg-success">GET</span></td>
+                                <td>Get current user info (with groups expansion)</td>
                             </tr>
                             <tr>
                                 <td><code>/api/v2/users/search</code></td>
                                 <td><span class="badge bg-warning text-dark">POST</span></td>
-                                <td>Search users</td>
+                                <td>Search users by name/email</td>
+                            </tr>
+                            <tr>
+                                <td><code>/api/v2/groups/{groupId}</code></td>
+                                <td><span class="badge bg-success">GET</span></td>
+                                <td>Get group details</td>
                             </tr>
                             <tr>
                                 <td><code>/api/v2/groups/search</code></td>
                                 <td><span class="badge bg-warning text-dark">POST</span></td>
-                                <td>Search groups</td>
+                                <td>Search groups by name</td>
+                            </tr>
+                            <tr>
+                                <td><code>/api/v2/flows/datatables/{id}/rows</code></td>
+                                <td><span class="badge bg-success">GET</span> <span class="badge bg-warning text-dark">POST</span></td>
+                                <td>Read/write original date entries</td>
                             </tr>
                         </tbody>
                     </table>
