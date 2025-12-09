@@ -48,11 +48,10 @@
                 <h5 class="mt-4">Voicemail Management</h5>
                 <ul>
                     <li><strong>View voicemails</strong> - List all voicemails with caller info, date, duration, and read status</li>
-                    <li><strong>Download individual</strong> - Download single voicemail as WAV file</li>
-                    <li><strong>Download bulk</strong> - Export multiple voicemails as ZIP archive with metadata</li>
+                    <li><strong>Playback</strong> - Listen to voicemails directly in your browser</li>
+                    <li><strong>Forward to user/group</strong> - Forward voicemail to another Genesys user or group</li>
                     <li><strong>Delete individual</strong> - Remove single voicemail with confirmation</li>
                     <li><strong>Delete bulk</strong> - Batch delete multiple voicemails with confirmation</li>
-                    <li><strong>Forward to user/group</strong> - Forward voicemail to another Genesys user or group</li>
                 </ul>
 
             </div>
@@ -91,35 +90,27 @@
                         </div>
                     </div>
 
-                    <!-- Downloading -->
+                    <!-- Playback -->
                     <div class="accordion-item">
                         <h2 class="accordion-header">
-                            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseDownload">
-                                <i class="bi bi-download me-2"></i>
-                                Downloading Voicemails
+                            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapsePlayback">
+                                <i class="bi bi-play-circle me-2"></i>
+                                Playing Voicemails
                             </button>
                         </h2>
-                        <div id="collapseDownload" class="accordion-collapse collapse" data-bs-parent="#howToAccordion">
+                        <div id="collapsePlayback" class="accordion-collapse collapse" data-bs-parent="#howToAccordion">
                             <div class="accordion-body">
-                                <h6>Individual Download:</h6>
                                 <ol>
-                                    <li>Find the voicemail you want to download on the dashboard</li>
-                                    <li>Click the <strong>download icon</strong> <i class="bi bi-download"></i> next to it</li>
-                                    <li>The WAV file will be downloaded to your computer</li>
+                                    <li>Find the voicemail you want to listen to on the dashboard</li>
+                                    <li>Click the <strong>play icon</strong> <i class="bi bi-play-circle text-primary"></i> next to it</li>
+                                    <li>A popup will appear with an audio player</li>
+                                    <li>Use the audio controls to play, pause, and seek through the voicemail</li>
+                                    <li>Close the popup when finished</li>
                                 </ol>
-                                
-                                <h6 class="mt-3">Bulk Download:</h6>
-                                <ol>
-                                    <li>Click the <strong>"Download All"</strong> button on the dashboard</li>
-                                    <li>Select the voicemails you want to download (or select all)</li>
-                                    <li>Click <strong>"Download Selected"</strong></li>
-                                    <li>Wait for the download to complete - a progress indicator will show status</li>
-                                    <li>A ZIP file containing all selected voicemails and metadata will be downloaded</li>
-                                </ol>
-                                
-                                <div class="alert alert-warning small mb-0">
-                                    <i class="bi bi-clock me-2"></i>
-                                    Large downloads (500+ voicemails) may take 8-12 minutes. Please keep the window open during processing.
+
+                                <div class="alert alert-info small mb-0">
+                                    <i class="bi bi-info-circle me-2"></i>
+                                    Audio is streamed directly from Genesys Cloud and is not stored on this server.
                                 </div>
                             </div>
                         </div>
@@ -207,7 +198,7 @@
             <div class="card-body">
                 <ul class="mb-0">
                     <li><strong>No password storage</strong> - Authentication handled entirely by Genesys Cloud OAuth 2.0 with PKCE</li>
-					<li><strong>No file storage</strong> - ZIP files created client-side in browser; voicemails never stored on server</li>
+					<li><strong>No file storage</strong> - Audio streamed directly from Genesys Cloud; voicemails never stored on server</li>
                     <li><strong>Token security</strong> - Access tokens stored only in server-side sessions and cleared on logout</li>
                     <li><strong>CSRF protection</strong> - OAuth state parameter prevents cross-site request forgery</li>
 					<li><strong>User isolation</strong> - Each user can only access their own voicemails</li>
@@ -240,7 +231,7 @@
                                 <td>Your voicemail inbox may be empty. Check Genesys UI to confirm.</td>
                             </tr>
                             <tr>
-                                <td>"Access denied" when downloading</td>
+                                <td>"Access denied" when playing</td>
                                 <td>The voicemail may have been deleted. Try refreshing the page.</td>
                             </tr>
                             <tr>
@@ -252,7 +243,7 @@
                                 <td>Log out and log back in to get a fresh token.</td>
                             </tr>
                             <tr>
-                                <td>Download/Forward/Delete taking too long</td>
+                                <td>Forward/Delete taking too long</td>
                                 <td>Large operations are processed in batches. Keep the window open and wait for completion.</td>
                             </tr>
                         </tbody>

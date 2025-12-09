@@ -1,6 +1,6 @@
 # Genesys Voicemail Manager
 
-A self-service web application for managing Genesys Cloud voicemails. Users can securely log in with their Genesys credentials to view, download, forward, and delete their voicemail messages.
+A self-service web application for managing Genesys Cloud voicemails. Users can securely log in with their Genesys credentials to view, play, forward, and delete their voicemail messages.
 
 ## Overview
 
@@ -10,16 +10,15 @@ Genesys Cloud enforces user-level ownership on voicemail media—administrators 
 
 ### Voicemail Management
 - **View voicemails** - List all voicemails with caller info, date, duration, and read status
-- **Download individual** - Download single voicemail as WAV file
-- **Download bulk** - Export multiple voicemails as ZIP archive with metadata
+- **Playback** - Listen to voicemails directly in your browser
+- **Forward to user/group** - Forward voicemail to another Genesys user or group
 - **Delete individual** - Remove single voicemail with confirmation
 - **Delete bulk** - Batch delete multiple voicemails with confirmation
-- **Forward to user/group** - Forward voicemail to another Genesys user or group
 
 ## Security
 
 - **No password storage** - Authentication handled entirely by Genesys Cloud OAuth 2.0 with PKCE
-- **No file storage** - ZIP files created client-side in browser; voicemails never stored on server
+- **No file storage** - Audio streamed directly from Genesys Cloud; voicemails never stored on server
 - **Token security** - Access tokens stored only in server-side sessions and cleared on logout
 - **User isolation** - Each user can only access their own voicemails
 - **HTTPS required** - All traffic encrypted
