@@ -32,19 +32,6 @@
 </div>
 
 {% if current_mailbox.type == 'group' %}
-<div class="alert alert-info mb-4">
-	<div class="d-flex align-items-center justify-content-between">
-		<div>
-			<i class="bi bi-info-circle-fill me-2"></i>
-			<strong>Group Mailbox:</strong> Original creation dates are available on demand for preview voicemails.
-			<span id="dateLoadStatus" class="ms-2 text-muted"></span>
-		</div>
-		<button type="button" class="btn btn-sm btn-outline-primary" id="loadDatesBtn" onclick="loadOriginalDates()">
-			<i class="bi bi-calendar-check me-1"></i> Load Original Dates
-		</button>
-	</div>
-</div>
-
 <!-- Forwarded By Filter -->
 <div class="filter-container" id="forwardedByFilterContainer">
 	<div class="d-flex align-items-center flex-wrap gap-2">
@@ -170,7 +157,7 @@
 				<thead class="table-light{% if current_mailbox.type == 'group' %} sticky-top{% endif %}">
 					<tr>
 						<th scope="col">#</th>
-						<th scope="col">VM ID</th>
+						<th scope="col">Conversation ID</th>
 						<th scope="col">Original Caller</th>
 						{% if current_mailbox.type == 'group' %}
 						<th scope="col">Forwarded By</th>
@@ -196,8 +183,8 @@
 						data-vm-caller="{{ vm.original_caller }}"
 						data-vm-duration="{{ vm.duration }}"
 						data-vm-date="{{ vm.created_date }}">
-						<td>{{ loop.index }}</td>
-						<td><code>{{ vm.id_short }}</code></td>
+						<td class="row-number-cell">{{ loop.index }}</td>
+						<td><code>{{ (vm.conversation_id or vm.id)[:8] }}</code></td>
 						<td>
 							{{ vm.original_caller }}
 							{% if current_mailbox.type != 'group' and vm.is_forwarded %}
@@ -254,7 +241,7 @@
 						<td class="text-center">
 							<div class="btn-group btn-group-sm">
 								<button type="button" class="btn btn-outline-primary btn-play"
-										onclick="playVoicemail('{{ vm.id }}', '{{ vm.original_caller|e }}', '{{ vm.duration }}', '{{ vm.created_date }}')"
+										onclick="playVoicemail('{{ vm.id }}', '{{ vm.original_caller|e }}', '{{ vm.duration }}', '{{ vm.conversation_id or '' }}')"
 										title="Play">
 									<i class="bi bi-play-fill"></i>
 								</button>
@@ -464,11 +451,12 @@ document.querySelectorAll('.download-btn').forEach(btn => {
 	});
 });
 
-// Load Original Dates functionality
-function loadOriginalDates() {
-	const btn = document.getElementById('loadDatesBtn');
-	const status = document.getElementById('dateLoadStatus');
-	
+// Global storage for loaded original dates (accessible from base.html playVoicemail)
+window.loadedOriginalDates = window.loadedOriginalDates || {};
+
+// Auto-load original dates for group mailbox on page load
+{% if current_mailbox.type == 'group' %}
+(function() {
 	// Collect all conversation IDs from forwarded voicemails
 	const conversationIds = [];
 	document.querySelectorAll('.voicemail-row').forEach(row => {
@@ -478,18 +466,9 @@ function loadOriginalDates() {
 			conversationIds.push(convId);
 		}
 	});
-	
-	if (conversationIds.length === 0) {
-		alert('No forwarded voicemails to load dates for');
-		return;
-	}
-	
-	// Show loading state
-	btn.disabled = true;
-	btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Loading...';
-	const estimatedTime = Math.ceil(conversationIds.length * 0.3);
-	status.textContent = `Fetching ${conversationIds.length} dates... (Est: ${estimatedTime}s)`;
-	
+
+	if (conversationIds.length === 0) return;
+
 	fetch('/api/load-original-dates', {
 		method: 'POST',
 		headers: {'Content-Type': 'application/json'},
@@ -498,38 +477,27 @@ function loadOriginalDates() {
 	.then(response => response.json())
 	.then(data => {
 		if (!data.success) {
-			alert('Failed to load dates: ' + (data.error || 'Unknown error'));
-			btn.disabled = false;
-			btn.innerHTML = '<i class="bi bi-calendar-check me-1"></i> Load Original Dates';
-			status.textContent = '';
+			console.error('Failed to load original dates:', data.error);
 			return;
 		}
-		
+
+		// Store dates globally for playVoicemail popup
+		Object.assign(window.loadedOriginalDates, data.dates);
+
 		// Update table cells with loaded dates
 		Object.entries(data.dates).forEach(([convId, date]) => {
-			// Find ALL rows with this conversation_id
 			const rows = document.querySelectorAll(`.voicemail-row[data-conversation-id="${convId}"]`);
 			rows.forEach(row => {
 				const cell = row.querySelector('.original-date-cell');
 				if (cell) {
-					const formatted = formatDate(date);
-					cell.innerHTML = `<small class="text-success">${formatted}</small>`;
+					cell.innerHTML = `<small class="text-success">${formatDate(date)}</small>`;
 				}
 			});
 		});
-		
-		status.innerHTML = `<i class="bi bi-check-circle-fill text-success me-1"></i>Loaded ${data.fetched} dates for ${data.total} voicemails`;
-		status.classList.add('text-success');
-		btn.remove();
 	})
-	.catch(error => {
-		console.error('Error:', error);
-		alert('An error occurred while loading dates');
-		btn.disabled = false;
-		btn.innerHTML = '<i class="bi bi-calendar-check me-1"></i> Load Original Dates';
-		status.textContent = '';
-	});
-}
+	.catch(error => console.error('Error loading original dates:', error));
+})();
+{% endif %}
 
 function formatDate(isoString) {
 	try {

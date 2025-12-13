@@ -1,6 +1,6 @@
 # Genesys Voicemail Manager
 
-A self-service web application for managing Genesys Cloud voicemails. Users can securely log in with their Genesys credentials to view, download, forward, and delete their voicemail messages.
+A self-service web application for managing Genesys Cloud voicemails. Users can securely log in with their Genesys credentials to view, play, forward, and delete their voicemail messages.
 
 ## Overview
 
@@ -10,16 +10,15 @@ Genesys Cloud enforces user-level ownership on voicemail media—administrators 
 
 ### Voicemail Management
 - **View voicemails** - List all voicemails with caller info, date, duration, and read status
-- **Download individual** - Download single voicemail as WAV file
-- **Download bulk** - Export multiple voicemails as ZIP archive with metadata
+- **Playback** - Listen to voicemails directly in your browser
+- **Forward to user/group** - Forward voicemail to another Genesys user or group
 - **Delete individual** - Remove single voicemail with confirmation
 - **Delete bulk** - Batch delete multiple voicemails with confirmation
-- **Forward to user/group** - Forward voicemail to another Genesys user or group
 
 ## Security
 
 - **No password storage** - Authentication handled entirely by Genesys Cloud OAuth 2.0 with PKCE
-- **No file storage** - ZIP files created client-side in browser; voicemails never stored on server
+- **No file storage** - Audio streamed directly from Genesys Cloud; voicemails never stored on server
 - **Token security** - Access tokens stored only in server-side sessions and cleared on logout
 - **User isolation** - Each user can only access their own voicemails
 - **HTTPS required** - All traffic encrypted
@@ -72,7 +71,6 @@ Genesys Cloud enforces user-level ownership on voicemail media—administrators 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/download/<id>` | GET | Download single voicemail as WAV |
-| `/download-bulk` | POST | Download multiple voicemails as ZIP (accepts JSON with voicemail_ids) |
 | `/api/forward` | POST | Forward voicemails (batch - accepts JSON with voicemail_ids, target_id, target_type) |
 | `/api/delete` | POST | Delete voicemails (batch - accepts JSON with voicemail_ids) |
 
@@ -82,10 +80,11 @@ Genesys Cloud enforces user-level ownership on voicemail media—administrators 
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/voicemails` | GET | List all voicemails (JSON, paginated) |
-| `/api/voicemails/stats` | GET | Get voicemail statistics (JSON) |
-| `/api/search/users` | GET | Search users by name/email |
-| `/api/search/groups` | GET | Search groups by name |
+| `/api/search/users` | GET | Search users by name/email (uses Genesys POST internally) |
+| `/api/search/groups` | GET | Search groups by name (uses Genesys POST internally) |
+| `/api/switch-mailbox` | POST | Switch between user/group mailbox (accepts JSON with type, id, name) |
+| `/api/voicemail/<id>/media-url` | GET | Get temporary media URL for audio playback |
+| `/api/load-original-dates` | POST | Load original dates from datatable (accepts JSON with conversation_ids) |
 
 ### Utility
 
@@ -99,11 +98,15 @@ The application internally makes these calls to Genesys Cloud:
 
 | Genesys API Endpoint | Method | Description |
 |---------------------|--------|-------------|
+| `/api/v2/voicemail/search` | POST | Search voicemails (user or group mailbox) |
 | `/api/v2/voicemail/messages` | POST | Forward/copy a voicemail |
 | `/api/v2/voicemail/messages/{messageId}` | DELETE | Delete a single voicemail |
-| `/api/v2/voicemail/me/messages` | GET | Get user's voicemails |
-| `/api/v2/users/search` | POST | Search users |
-| `/api/v2/groups/search` | POST | Search groups |
+| `/api/v2/voicemail/messages/{messageId}/media` | GET | Get voicemail media URL |
+| `/api/v2/users/me` | GET | Get current user info (with groups expansion) |
+| `/api/v2/users/search` | POST | Search users by name/email |
+| `/api/v2/groups/{groupId}` | GET | Get group details |
+| `/api/v2/groups/search` | POST | Search groups by name |
+| `/api/v2/flows/datatables/{id}/rows` | GET/POST | Read/write original date entries |
 
 ## Troubleshooting
 
