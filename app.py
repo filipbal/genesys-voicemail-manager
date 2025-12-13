@@ -1151,8 +1151,11 @@ def load_original_dates():
 	if not conversation_ids:
 		return jsonify({'success': False, 'error': 'No conversation IDs provided'}), 400
 
-	if len(conversation_ids) > 2000:
-		return jsonify({'success': False, 'error': 'Too many IDs (max 2000)'}), 400
+	if len(conversation_ids) > 500:
+		return jsonify({'success': False, 'error': 'Too many IDs per request (max 500)'}), 400
+
+	# Rate limit buffer - add delay at start of request to prevent hitting API limits
+	time.sleep(1.0)
 
 	access_token = session.get('access_token')
 	region_host = session.get('region_host')

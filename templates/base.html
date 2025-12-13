@@ -482,6 +482,160 @@
     document.addEventListener('DOMContentLoaded', function() {
         initForwardedByFilter();
     });
+
+    // ============================================
+    // LAZY LOAD ORIGINAL DATES (CHUNKED)
+    // ============================================
+
+    // Global storage for loaded original dates (accessible from playVoicemail)
+    window.loadedOriginalDates = window.loadedOriginalDates || {};
+
+    // Track fetched IDs to avoid duplicates
+    window.fetchedOriginalDateIds = window.fetchedOriginalDateIds || new Set();
+
+    // Configuration for chunked loading
+    const ORIGINAL_DATES_CHUNK_SIZE = 100;
+    const ORIGINAL_DATES_CHUNK_DELAY_MS = 1000;
+
+    /**
+     * Format ISO date string to human-readable format
+     */
+    function formatOriginalDate(isoString) {
+        try {
+            const dt = new Date(isoString);
+            return dt.toLocaleString('en-US', {
+                year: 'numeric', month: '2-digit', day: '2-digit',
+                hour: '2-digit', minute: '2-digit', second: '2-digit'
+            });
+        } catch {
+            return isoString;
+        }
+    }
+
+    /**
+     * Sleep helper for delays between chunks
+     */
+    function sleepMs(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    /**
+     * Load original dates for all forwarded voicemails in chunks.
+     * Shows "Loading..." initially, then updates cells as chunks complete.
+     * Called automatically when page has group mailbox with .original-date-cell elements.
+     */
+    async function loadOriginalDatesChunked() {
+        // Collect all conversation IDs from forwarded voicemails that haven't been fetched yet
+        const conversationIds = [];
+        const cellMap = {}; // Map convId -> array of cells
+
+        document.querySelectorAll('.voicemail-row').forEach(row => {
+            const convId = row.dataset.conversationId;
+            const isForwarded = row.dataset.isForwarded === 'true';
+
+            if (convId && isForwarded && !window.fetchedOriginalDateIds.has(convId)) {
+                if (!cellMap[convId]) {
+                    cellMap[convId] = [];
+                    conversationIds.push(convId);
+                }
+                const cell = row.querySelector('.original-date-cell');
+                if (cell) {
+                    cellMap[convId].push(cell);
+                }
+            }
+        });
+
+        if (conversationIds.length === 0) {
+            console.log('No original dates to load');
+            return;
+        }
+
+        console.log(`Loading original dates for ${conversationIds.length} voicemails in chunks of ${ORIGINAL_DATES_CHUNK_SIZE}`);
+
+        // Show "Loading..." in all cells that will be fetched
+        conversationIds.forEach(convId => {
+            cellMap[convId].forEach(cell => {
+                cell.innerHTML = '<small class="text-muted"><i class="bi bi-hourglass-split me-1"></i>Loading...</small>';
+            });
+        });
+
+        // Split into chunks
+        const chunks = [];
+        for (let i = 0; i < conversationIds.length; i += ORIGINAL_DATES_CHUNK_SIZE) {
+            chunks.push(conversationIds.slice(i, i + ORIGINAL_DATES_CHUNK_SIZE));
+        }
+
+        console.log(`Split into ${chunks.length} chunks`);
+
+        // Process chunks sequentially with delay
+        for (let i = 0; i < chunks.length; i++) {
+            const chunk = chunks[i];
+            console.log(`Fetching chunk ${i + 1}/${chunks.length} (${chunk.length} IDs)`);
+
+            try {
+                const response = await fetch('/api/load-original-dates', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({conversation_ids: chunk})
+                });
+
+                const data = await response.json();
+
+                if (!data.success) {
+                    console.error(`Chunk ${i + 1} failed:`, data.error);
+                    // Mark these cells as failed with "-"
+                    chunk.forEach(convId => {
+                        window.fetchedOriginalDateIds.add(convId);
+                        cellMap[convId].forEach(cell => {
+                            cell.innerHTML = '<small class="text-muted">-</small>';
+                        });
+                    });
+                } else {
+                    // Update cells with loaded dates
+                    chunk.forEach(convId => {
+                        window.fetchedOriginalDateIds.add(convId);
+                        const date = data.dates[convId];
+
+                        if (date) {
+                            window.loadedOriginalDates[convId] = date;
+                            cellMap[convId].forEach(cell => {
+                                cell.innerHTML = `<small class="text-success">${formatOriginalDate(date)}</small>`;
+                            });
+                        } else {
+                            cellMap[convId].forEach(cell => {
+                                cell.innerHTML = '<small class="text-muted">-</small>';
+                            });
+                        }
+                    });
+
+                    console.log(`Chunk ${i + 1} complete: ${data.fetched} found, ${data.failed} not found`);
+                }
+            } catch (error) {
+                console.error(`Error fetching chunk ${i + 1}:`, error);
+                // Mark these cells as failed with "-"
+                chunk.forEach(convId => {
+                    window.fetchedOriginalDateIds.add(convId);
+                    cellMap[convId].forEach(cell => {
+                        cell.innerHTML = '<small class="text-muted">-</small>';
+                    });
+                });
+            }
+
+            // Delay before next chunk (except for last chunk)
+            if (i < chunks.length - 1) {
+                await sleepMs(ORIGINAL_DATES_CHUNK_DELAY_MS);
+            }
+        }
+
+        // Final pass: change any remaining "Loading..." to "-"
+        document.querySelectorAll('.original-date-cell').forEach(cell => {
+            if (cell.textContent.includes('Loading')) {
+                cell.innerHTML = '<small class="text-muted">-</small>';
+            }
+        });
+
+        console.log('All original dates loading complete');
+    }
     </script>
 
     {% block extra_js %}{% endblock %}
