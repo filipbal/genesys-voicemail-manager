@@ -331,63 +331,15 @@ const BATCH_SIZE = {{ batch_size }};
 let searchTimeout = null;
 let selectedTarget = null;
 
-// Global storage for loaded original dates (accessible from base.html playVoicemail)
-window.loadedOriginalDates = window.loadedOriginalDates || {};
-
-// Auto-load original dates for group mailbox on page load
+// Auto-load original dates for group mailbox on page load (chunked)
 {% if current_mailbox.type == 'group' %}
-(function() {
-	const conversationIds = [];
-	document.querySelectorAll('.voicemail-row').forEach(row => {
-		const convId = row.dataset.conversationId;
-		const isForwarded = row.dataset.isForwarded === 'true';
-		if (convId && isForwarded) {
-			conversationIds.push(convId);
-		}
-	});
-
-	if (conversationIds.length === 0) return;
-
-	fetch('/api/load-original-dates', {
-		method: 'POST',
-		headers: {'Content-Type': 'application/json'},
-		body: JSON.stringify({conversation_ids: conversationIds})
-	})
-	.then(response => response.json())
-	.then(data => {
-		if (!data.success) {
-			console.error('Failed to load original dates:', data.error);
-			return;
-		}
-
-		// Store dates globally for playVoicemail popup
-		Object.assign(window.loadedOriginalDates, data.dates);
-
-		Object.entries(data.dates).forEach(([convId, date]) => {
-			const rows = document.querySelectorAll(`.voicemail-row[data-conversation-id="${convId}"]`);
-			rows.forEach(row => {
-				const cell = row.querySelector('.original-date-cell');
-				if (cell) {
-					cell.innerHTML = `<small class="text-success">${formatDate(date)}</small>`;
-				}
-			});
-		});
-	})
-	.catch(error => console.error('Error loading original dates:', error));
-})();
-{% endif %}
-
-function formatDate(isoString) {
-	try {
-		const dt = new Date(isoString);
-		return dt.toLocaleString('en-US', {
-			year: 'numeric', month: '2-digit', day: '2-digit',
-			hour: '2-digit', minute: '2-digit', second: '2-digit'
-		});
-	} catch {
-		return isoString;
+document.addEventListener('DOMContentLoaded', function() {
+	// Use the consolidated chunked loading from base.html
+	if (typeof loadOriginalDatesChunked === 'function') {
+		loadOriginalDatesChunked();
 	}
-}
+});
+{% endif %}
 
 // Target type change handler
 document.querySelectorAll('input[name="targetType"]').forEach(radio => {
