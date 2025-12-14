@@ -1141,7 +1141,15 @@ def get_voicemail_media_url(message_id):
 @app.route('/api/load-original-dates', methods=['POST'])
 @login_required
 def load_original_dates():
-	"""Load original dates from data table for specific voicemails using bulk endpoint."""
+	"""
+	Load original dates from data table for voicemails.
+
+	Optimized approach:
+	- Accepts all conversation_ids at once (no chunking needed)
+	- Fetches entire datatable in paginated calls (500 rows/page, ~8 API calls max for 4000 records)
+	- Returns all matching dates in single response
+	- No artificial delays - relies on make_api_request retry logic for rate limits
+	"""
 	data = request.get_json()
 	conversation_ids = data.get('conversation_ids', [])
 
@@ -1151,21 +1159,15 @@ def load_original_dates():
 	if not conversation_ids:
 		return jsonify({'success': False, 'error': 'No conversation IDs provided'}), 400
 
-	if len(conversation_ids) > 500:
-		return jsonify({'success': False, 'error': 'Too many IDs per request (max 500)'}), 400
-
-	# Rate limit buffer - add delay at start of request to prevent hitting API limits
-	time.sleep(1.0)
-
 	access_token = session.get('access_token')
 	region_host = session.get('region_host')
 
 	# Deduplicate conversation IDs to avoid duplicate lookups
 	unique_conv_ids = set(conversation_ids)
 
-	app.logger.info(f"Loading original dates for {len(unique_conv_ids)} unique conversations (from {len(conversation_ids)} total)...")
+	app.logger.info(f"Loading original dates for {len(unique_conv_ids)} unique conversations...")
 
-	# Fetch all rows from datatable using bulk endpoint with pagination
+	# Fetch all rows from datatable using bulk endpoint with pagination (500 rows/page)
 	all_rows = {}
 	url = f"https://api.{region_host}/api/v2/flows/datatables/{DATATABLE_ID}/rows?showbrief=false&pageSize=500"
 	page_count = 0
@@ -1189,7 +1191,7 @@ def load_original_dates():
 			if row_key and original_date:
 				all_rows[row_key] = original_date
 
-		app.logger.info(f"Fetched page {page_count}: {len(entities)} rows (total cached: {len(all_rows)})")
+		app.logger.info(f"Fetched datatable page {page_count}: {len(entities)} rows (total: {len(all_rows)})")
 
 		# Check for next page
 		next_uri = response_data.get('nextUri')
@@ -1203,23 +1205,24 @@ def load_original_dates():
 	# Match requested conversation IDs with fetched data
 	results = {}
 	fetched = 0
-	failed = 0
+	not_found = 0
 
 	for conv_id in unique_conv_ids:
 		if conv_id in all_rows:
 			results[conv_id] = all_rows[conv_id]
 			fetched += 1
 		else:
-			failed += 1
+			not_found += 1
 
-	app.logger.info(f"Loaded {fetched} original dates, {failed} not found (from {len(all_rows)} total datatable rows in {page_count} pages)")
+	app.logger.info(f"Original dates loaded: {fetched} found, {not_found} not found ({page_count} API pages fetched)")
 
 	return jsonify({
 		'success': True,
 		'dates': results,
 		'fetched': fetched,
-		'failed': failed,
-		'total': len(unique_conv_ids)
+		'not_found': not_found,
+		'total_requested': len(unique_conv_ids),
+		'datatable_rows': len(all_rows)
 	})
 
 @app.route('/logout')
