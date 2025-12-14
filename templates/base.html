@@ -484,18 +484,14 @@
     });
 
     // ============================================
-    // LAZY LOAD ORIGINAL DATES (CHUNKED)
+    // LAZY LOAD ORIGINAL DATES (OPTIMIZED)
     // ============================================
 
-    // Global storage for loaded original dates (accessible from playVoicemail)
+    // Global storage for loaded original dates (used by playVoicemail and filters)
     window.loadedOriginalDates = window.loadedOriginalDates || {};
 
-    // Track fetched IDs to avoid duplicates
-    window.fetchedOriginalDateIds = window.fetchedOriginalDateIds || new Set();
-
-    // Configuration for chunked loading
-    const ORIGINAL_DATES_CHUNK_SIZE = 100;
-    const ORIGINAL_DATES_CHUNK_DELAY_MS = 1000;
+    // Track if dates have been loaded to avoid duplicate fetches
+    window.originalDatesLoaded = window.originalDatesLoaded || false;
 
     /**
      * Format ISO date string to human-readable format
@@ -513,128 +509,172 @@
     }
 
     /**
-     * Sleep helper for delays between chunks
+     * Show loading overlay on the voicemail table
      */
-    function sleepMs(ms) {
-        return new Promise(resolve => setTimeout(resolve, ms));
+    function showTableLoadingOverlay(show) {
+        let overlay = document.getElementById('originalDatesLoadingOverlay');
+        const table = document.querySelector('.table-responsive') || document.querySelector('table');
+
+        if (!table) return;
+
+        if (show) {
+            if (!overlay) {
+                overlay = document.createElement('div');
+                overlay.id = 'originalDatesLoadingOverlay';
+                overlay.style.cssText = `
+                    position: absolute;
+                    top: 0;
+                    left: 0;
+                    right: 0;
+                    bottom: 0;
+                    background: rgba(255, 255, 255, 0.8);
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    z-index: 1000;
+                    border-radius: 0.375rem;
+                `;
+                overlay.innerHTML = `
+                    <div class="text-center">
+                        <div class="spinner-border text-primary mb-2" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <div class="text-muted small">Loading original dates...</div>
+                    </div>
+                `;
+
+                // Make table container relative for overlay positioning
+                const container = table.closest('.table-responsive') || table.parentElement;
+                if (container) {
+                    container.style.position = 'relative';
+                    container.appendChild(overlay);
+                }
+            }
+            overlay.style.display = 'flex';
+        } else {
+            if (overlay) {
+                overlay.style.display = 'none';
+            }
+        }
     }
 
     /**
-     * Load original dates for all forwarded voicemails in chunks.
-     * Shows "Loading..." initially, then updates cells as chunks complete.
-     * Called automatically when page has group mailbox with .original-date-cell elements.
+     * Load original dates for all forwarded voicemails in a single API call.
+     *
+     * Optimizations:
+     * - Single API call with all conversation_ids (backend handles pagination)
+     * - Builds cellMap upfront before API call
+     * - Batch DOM updates using requestAnimationFrame
+     * - Shows loading overlay during fetch
+     * - Preserves window.loadedOriginalDates for filter/audio player
      */
-    async function loadOriginalDatesChunked() {
-        // Collect all conversation IDs from forwarded voicemails that haven't been fetched yet
+    async function loadOriginalDates() {
+        // Skip if already loaded
+        if (window.originalDatesLoaded) {
+            console.log('Original dates already loaded, skipping');
+            return;
+        }
+
+        // Build map of conversationId -> array of cells UPFRONT (before API call)
+        const cellMap = new Map();
         const conversationIds = [];
-        const cellMap = {}; // Map convId -> array of cells
 
         document.querySelectorAll('.voicemail-row').forEach(row => {
             const convId = row.dataset.conversationId;
             const isForwarded = row.dataset.isForwarded === 'true';
 
-            if (convId && isForwarded && !window.fetchedOriginalDateIds.has(convId)) {
-                if (!cellMap[convId]) {
-                    cellMap[convId] = [];
-                    conversationIds.push(convId);
-                }
+            if (convId && isForwarded) {
                 const cell = row.querySelector('.original-date-cell');
                 if (cell) {
-                    cellMap[convId].push(cell);
+                    if (!cellMap.has(convId)) {
+                        cellMap.set(convId, []);
+                        conversationIds.push(convId);
+                    }
+                    cellMap.get(convId).push(cell);
                 }
             }
         });
 
         if (conversationIds.length === 0) {
             console.log('No original dates to load');
+            window.originalDatesLoaded = true;
             return;
         }
 
-        console.log(`Loading original dates for ${conversationIds.length} voicemails in chunks of ${ORIGINAL_DATES_CHUNK_SIZE}`);
+        console.log(`Loading original dates for ${conversationIds.length} voicemails (single API call)`);
 
-        // Show "Loading..." in all cells that will be fetched
-        conversationIds.forEach(convId => {
-            cellMap[convId].forEach(cell => {
-                cell.innerHTML = '<small class="text-muted"><i class="bi bi-hourglass-split me-1"></i>Loading...</small>';
+        // Show loading overlay
+        showTableLoadingOverlay(true);
+
+        try {
+            const response = await fetch('/api/load-original-dates', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({conversation_ids: conversationIds})
             });
-        });
 
-        // Split into chunks
-        const chunks = [];
-        for (let i = 0; i < conversationIds.length; i += ORIGINAL_DATES_CHUNK_SIZE) {
-            chunks.push(conversationIds.slice(i, i + ORIGINAL_DATES_CHUNK_SIZE));
-        }
+            const data = await response.json();
 
-        console.log(`Split into ${chunks.length} chunks`);
-
-        // Process chunks sequentially with delay
-        for (let i = 0; i < chunks.length; i++) {
-            const chunk = chunks[i];
-            console.log(`Fetching chunk ${i + 1}/${chunks.length} (${chunk.length} IDs)`);
-
-            try {
-                const response = await fetch('/api/load-original-dates', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({conversation_ids: chunk})
-                });
-
-                const data = await response.json();
-
-                if (!data.success) {
-                    console.error(`Chunk ${i + 1} failed:`, data.error);
-                    // Mark these cells as failed with "-"
-                    chunk.forEach(convId => {
-                        window.fetchedOriginalDateIds.add(convId);
-                        cellMap[convId].forEach(cell => {
+            if (!data.success) {
+                console.error('Failed to load original dates:', data.error);
+                // Mark all cells as failed
+                requestAnimationFrame(() => {
+                    cellMap.forEach((cells) => {
+                        cells.forEach(cell => {
                             cell.innerHTML = '<small class="text-muted">-</small>';
                         });
                     });
-                } else {
-                    // Update cells with loaded dates
-                    chunk.forEach(convId => {
-                        window.fetchedOriginalDateIds.add(convId);
-                        const date = data.dates[convId];
+                    showTableLoadingOverlay(false);
+                });
+                return;
+            }
 
-                        if (date) {
-                            window.loadedOriginalDates[convId] = date;
-                            cellMap[convId].forEach(cell => {
-                                cell.innerHTML = `<small class="text-success">${formatOriginalDate(date)}</small>`;
-                            });
-                        } else {
-                            cellMap[convId].forEach(cell => {
-                                cell.innerHTML = '<small class="text-muted">-</small>';
-                            });
-                        }
-                    });
+            // Batch update all cells in single requestAnimationFrame
+            requestAnimationFrame(() => {
+                const dates = data.dates || {};
 
-                    console.log(`Chunk ${i + 1} complete: ${data.fetched} found, ${data.failed} not found`);
-                }
-            } catch (error) {
-                console.error(`Error fetching chunk ${i + 1}:`, error);
-                // Mark these cells as failed with "-"
-                chunk.forEach(convId => {
-                    window.fetchedOriginalDateIds.add(convId);
-                    cellMap[convId].forEach(cell => {
+                cellMap.forEach((cells, convId) => {
+                    const date = dates[convId];
+
+                    if (date) {
+                        // Store in global dictionary for audio player and filters
+                        window.loadedOriginalDates[convId] = date;
+                        const formattedDate = formatOriginalDate(date);
+                        cells.forEach(cell => {
+                            cell.innerHTML = `<small class="text-success">${formattedDate}</small>`;
+                        });
+                    } else {
+                        cells.forEach(cell => {
+                            cell.innerHTML = '<small class="text-muted">-</small>';
+                        });
+                    }
+                });
+
+                // Hide loading overlay
+                showTableLoadingOverlay(false);
+
+                console.log(`Original dates loaded: ${data.fetched} found, ${data.not_found} not found (${data.datatable_rows} total in datatable)`);
+            });
+
+            window.originalDatesLoaded = true;
+
+        } catch (error) {
+            console.error('Error fetching original dates:', error);
+            // Mark all cells as failed
+            requestAnimationFrame(() => {
+                cellMap.forEach((cells) => {
+                    cells.forEach(cell => {
                         cell.innerHTML = '<small class="text-muted">-</small>';
                     });
                 });
-            }
-
-            // Delay before next chunk (except for last chunk)
-            if (i < chunks.length - 1) {
-                await sleepMs(ORIGINAL_DATES_CHUNK_DELAY_MS);
-            }
+                showTableLoadingOverlay(false);
+            });
         }
+    }
 
-        // Final pass: change any remaining "Loading..." to "-"
-        document.querySelectorAll('.original-date-cell').forEach(cell => {
-            if (cell.textContent.includes('Loading')) {
-                cell.innerHTML = '<small class="text-muted">-</small>';
-            }
-        });
-
-        console.log('All original dates loading complete');
+    // Backward compatibility alias
+    function loadOriginalDatesChunked() {
+        return loadOriginalDates();
     }
     </script>
 
