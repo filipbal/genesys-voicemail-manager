@@ -190,11 +190,15 @@
                             <i class="bi bi-grid-3x3-gap-fill me-1"></i> Dashboard
                         </a>
                     </li>
+					{# Download link hidden - legacy code kept #}
+					{#
 					<li class="nav-item">
                         <a class="nav-link" href="{{ url_for('download_page') }}">
                             <i class="bi bi-download me-1"></i> Download
                         </a>
                     </li>
+					#}
+                    {% if current_mailbox is not defined or current_mailbox.type != 'group' %}
                     <li class="nav-item">
                         <a class="nav-link" href="{{ url_for('forward_page') }}">
                             <i class="bi bi-forward me-1"></i> Forward
@@ -205,6 +209,7 @@
                             <i class="bi bi-trash me-1"></i> Delete
                         </a>
                     </li>
+                    {% endif %}
                     <li class="nav-item">
                         <a class="nav-link" href="{{ url_for('logout') }}">
                             <i class="bi bi-box-arrow-right me-1"></i> Logout
