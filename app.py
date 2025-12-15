@@ -161,6 +161,45 @@ def lookup_user_name_from_cache(access_token, region_host, user_id):
 
 	return data.get('userName')
 
+def fetch_all_user_names_cache(access_token, region_host):
+	"""Bulk fetch entire UserNameCache datatable. Returns dict {userId: userName}."""
+	if not USER_CACHE_DATATABLE_ID:
+		return {}
+
+	all_users = {}
+	url = f"https://api.{region_host}/api/v2/flows/datatables/{USER_CACHE_DATATABLE_ID}/rows?showbrief=false&pageSize=500"
+	page_count = 0
+
+	while url:
+		page_count += 1
+		response_data, error = make_api_request(url, access_token)
+
+		if error:
+			app.logger.error(f"Error fetching user cache (page {page_count}): {error}")
+			break
+
+		if not response_data:
+			break
+
+		entities = response_data.get('entities', [])
+		for row in entities:
+			user_id = row.get('key')
+			user_name = row.get('userName')
+			if user_id and user_name:
+				all_users[user_id] = user_name
+
+		app.logger.debug(f"Fetched user cache page {page_count}: {len(entities)} rows (total: {len(all_users)})")
+
+		next_uri = response_data.get('nextUri')
+		if next_uri:
+			url = f"https://api.{region_host}{next_uri}"
+			time.sleep(API_DELAY_DATATABLE)
+		else:
+			url = None
+
+	app.logger.info(f"User name cache loaded: {len(all_users)} users ({page_count} pages)")
+	return all_users
+
 # ============================================================================
 # AUTHENTICATION HELPERS
 # ============================================================================
@@ -687,14 +726,14 @@ def process_voicemails_in_batches(access_token, region_host, voicemails_data, op
 # HELPERS
 # ============================================================================
 
-def format_voicemail(vm, access_token, region_host, load_original_dates=False):
+def format_voicemail(vm, access_token, region_host, load_original_dates=False, user_cache_dict=None):
 	"""Format voicemail with full date and forwarding info"""
 	created = vm.get('createdDate', '')
 	modified = vm.get('modifiedDate', '')
-	
+
 	caller_name = vm.get('callerName', '')
 	caller_address = vm.get('callerAddress', '')
-	
+
 	# Parse embedded original timestamp (legacy support)
 	embedded_date = None
 	source_field = caller_name if caller_name else caller_address
@@ -708,19 +747,23 @@ def format_voicemail(vm, access_token, region_host, load_original_dates=False):
 			pass
 
 	original_caller = caller_name if caller_name else source_field if source_field else 'Unknown'
-	
+
 	copied_from = vm.get('copiedFrom')
 	is_forwarded = copied_from is not None
 	forwarded_by = None
 	original_date = None
-	
+
 	conversation_id = vm.get('conversation', {}).get('id')
-	
+
 	if is_forwarded:
 		# Look up forwarded_by from UserNameCache datatable
 		user_id = copied_from.get('user', {}).get('id')
 		if user_id:
-			cached_name = lookup_user_name_from_cache(access_token, region_host, user_id)
+			# Use bulk cache if provided, otherwise fall back to individual lookup
+			if user_cache_dict is not None:
+				cached_name = user_cache_dict.get(user_id)
+			else:
+				cached_name = lookup_user_name_from_cache(access_token, region_host, user_id)
 			forwarded_by = cached_name if cached_name else 'Unknown'
 		else:
 			forwarded_by = 'Unknown'
@@ -923,7 +966,9 @@ def dashboard():
 		flash(f"Error fetching voicemails: {error}", 'warning')
 		voicemails = []
 
-	formatted = [format_voicemail(vm, token, host, load_original_dates=False) for vm in voicemails]
+	# Bulk fetch user name cache for efficient forwarded_by lookups
+	user_cache = fetch_all_user_names_cache(token, host)
+	formatted = [format_voicemail(vm, token, host, load_original_dates=False, user_cache_dict=user_cache) for vm in voicemails]
 	total_sec = sum(vm.get('audioRecordingDurationSeconds', 0) or 0 for vm in voicemails)
 
 	# For group mailboxes, show all voicemails; for user mailboxes, show preview of 20
@@ -995,7 +1040,9 @@ def download_page():
 	)
 	if not voicemails:
 		voicemails = []
-	formatted = [format_voicemail(vm, session.get('access_token'), session.get('region_host'), load_original_dates=False) for vm in voicemails]
+	# Bulk fetch user name cache for efficient forwarded_by lookups
+	user_cache = fetch_all_user_names_cache(session.get('access_token'), session.get('region_host'))
+	formatted = [format_voicemail(vm, session.get('access_token'), session.get('region_host'), load_original_dates=False, user_cache_dict=user_cache) for vm in voicemails]
 	return render_template('download.html',
 						 user_info=session.get('user_info'),
 						 region=REGIONS.get(session.get('region_key')),
@@ -1018,7 +1065,9 @@ def forward_page():
 		mailbox_type=current_mailbox['type'],
 		mailbox_id=current_mailbox['id']
 	)
-	formatted = [format_voicemail(vm, session.get('access_token'), session.get('region_host'), load_original_dates=False) for vm in (voicemails or [])]
+	# Bulk fetch user name cache for efficient forwarded_by lookups
+	user_cache = fetch_all_user_names_cache(session.get('access_token'), session.get('region_host'))
+	formatted = [format_voicemail(vm, session.get('access_token'), session.get('region_host'), load_original_dates=False, user_cache_dict=user_cache) for vm in (voicemails or [])]
 	return render_template('forward.html',
 						 user_info=session.get('user_info'),
 						 region=REGIONS.get(session.get('region_key')),
@@ -1041,7 +1090,9 @@ def delete_page():
 		mailbox_type=current_mailbox['type'],
 		mailbox_id=current_mailbox['id']
 	)
-	formatted = [format_voicemail(vm, session.get('access_token'), session.get('region_host'), load_original_dates=False) for vm in (voicemails or [])]
+	# Bulk fetch user name cache for efficient forwarded_by lookups
+	user_cache = fetch_all_user_names_cache(session.get('access_token'), session.get('region_host'))
+	formatted = [format_voicemail(vm, session.get('access_token'), session.get('region_host'), load_original_dates=False, user_cache_dict=user_cache) for vm in (voicemails or [])]
 	return render_template('delete.html',
 						 user_info=session.get('user_info'),
 						 region=REGIONS.get(session.get('region_key')),
