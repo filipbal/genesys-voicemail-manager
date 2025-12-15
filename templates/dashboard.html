@@ -31,24 +31,6 @@
 	</div>
 </div>
 
-{% if current_mailbox.type == 'group' %}
-<!-- Forwarded By Filter -->
-<div class="filter-container" id="forwardedByFilterContainer">
-	<div class="d-flex align-items-center flex-wrap gap-2">
-		<label for="forwardedByFilter" class="form-label mb-0 fw-semibold">
-			<i class="bi bi-funnel me-1"></i> Filter by Forwarded By:
-		</label>
-		<select id="forwardedByFilter" class="form-select form-select-sm" onchange="filterByForwardedBy()">
-			<option value="">All Users</option>
-		</select>
-		<button type="button" class="btn btn-sm btn-outline-secondary" onclick="clearFilter()">
-			<i class="bi bi-x-lg me-1"></i> Clear
-		</button>
-		<span id="filterStatus"></span>
-	</div>
-</div>
-{% endif %}
-
 <div class="row mb-4">
 	<div class="col-md mt-3 mt-md-0">
 		<div class="card stats-card">
@@ -129,6 +111,24 @@
 		</div>
 	</div>
 </div>
+
+{% if current_mailbox.type == 'group' %}
+<!-- Forwarded By Filter -->
+<div class="filter-container" id="forwardedByFilterContainer">
+	<div class="d-flex align-items-center flex-wrap gap-2">
+		<label for="forwardedByFilter" class="form-label mb-0 fw-semibold">
+			<i class="bi bi-funnel me-1"></i> Filter by Forwarded By:
+		</label>
+		<select id="forwardedByFilter" class="form-select form-select-sm" onchange="filterByForwardedBy()">
+			<option value="">All Users</option>
+		</select>
+		<button type="button" class="btn btn-sm btn-outline-secondary" onclick="clearFilter()">
+			<i class="bi bi-x-lg me-1"></i> Clear
+		</button>
+		<span id="filterStatus"></span>
+	</div>
+</div>
+{% endif %}
 
 <div class="card">
 	<div class="card-header d-flex justify-content-between align-items-center">
