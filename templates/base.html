@@ -1,688 +1,680 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}Voicemail Exporter{% endblock %} - Genesys Cloud</title>
-    
-    <!-- Bootstrap CSS -->
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
-    <!-- Bootstrap Icons -->
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
-    
-    <style>
-        :root {
-            --primary-color: #ff4f1f;
-            --secondary-color: #1a1a2e;
-        }
-        
-        body {
-            background-color: #f8f9fa;
-            min-height: 100vh;
-        }
-        
-        .navbar {
-            background-color: var(--secondary-color) !important;
-        }
-        
-        .navbar-brand {
-            color: white !important;
-            font-weight: 600;
-        }
-        
-        .btn-genesys {
-            background-color: var(--primary-color);
-            border-color: var(--primary-color);
-            color: white;
-        }
-        
-        .btn-genesys:hover {
-            background-color: #e6451c;
-            border-color: #e6451c;
-            color: white;
-        }
-        
-        .card {
-            border: none;
-            box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
-        }
-        
-        .card-header {
-            background-color: white;
-            border-bottom: 1px solid #e9ecef;
-        }
-        
-        .voicemail-row {
-            transition: background-color 0.2s;
-        }
-        
-        .voicemail-row:hover {
-            background-color: #f8f9fa;
-        }
-        
-        .voicemail-unread {
-            font-weight: 600;
-        }
-        
-        .badge-region {
-            background-color: var(--secondary-color);
-        }
-        
-        .user-info {
-            background: linear-gradient(135deg, var(--secondary-color) 0%, #16213e 100%);
-            color: white;
-            border-radius: 0.5rem;
-            padding: 1.5rem;
-            margin-bottom: 1.5rem;
-        }
-        
-        .stats-card {
-            border-left: 4px solid var(--primary-color);
-        }
-        
-        .footer {
-            background-color: var(--secondary-color);
-            color: #adb5bd;
-            padding: 1rem 0;
-            margin-top: auto;
-        }
-        
-        .loading-spinner {
-            display: none;
-        }
-        
-        .loading .loading-spinner {
-            display: inline-block;
-        }
-        
-        .loading .btn-text {
-            display: none;
-        }
-        
-        @media (max-width: 768px) {
-            .table-responsive {
-                font-size: 0.875rem;
-            }
-        }
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>{% block title %}Voicemail Exporter{% endblock %} - Genesys Cloud</title>
+	
+	<!-- Bootstrap CSS -->
+	<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+	<!-- Bootstrap Icons -->
+	<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
+	
+	<style>
+		:root {
+			--primary-color: #ff4f1f;
+			--secondary-color: #1a1a2e;
+		}
+		
+		body {
+			background-color: #f8f9fa;
+			min-height: 100vh;
+		}
+		
+		.navbar {
+			background-color: var(--secondary-color) !important;
+		}
+		
+		.navbar-brand {
+			color: white !important;
+			font-weight: 600;
+		}
+		
+		.btn-genesys {
+			background-color: var(--primary-color);
+			border-color: var(--primary-color);
+			color: white;
+		}
+		
+		.btn-genesys:hover {
+			background-color: #e6451c;
+			border-color: #e6451c;
+			color: white;
+		}
+		
+		.card {
+			border: none;
+			box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+		}
+		
+		.card-header {
+			background-color: white;
+			border-bottom: 1px solid #e9ecef;
+		}
+		
+		.voicemail-row {
+			transition: background-color 0.2s;
+		}
+		
+		.voicemail-row:hover {
+			background-color: #f8f9fa;
+		}
+		
+		.voicemail-unread {
+			font-weight: 600;
+		}
+		
+		.badge-region {
+			background-color: var(--secondary-color);
+		}
+		
+		.user-info {
+			background: linear-gradient(135deg, var(--secondary-color) 0%, #16213e 100%);
+			color: white;
+			border-radius: 0.5rem;
+			padding: 1.5rem;
+			margin-bottom: 1.5rem;
+		}
+		
+		.stats-card {
+			border-left: 4px solid var(--primary-color);
+		}
+		
+		.footer {
+			background-color: var(--secondary-color);
+			color: #adb5bd;
+			padding: 1rem 0;
+			margin-top: auto;
+		}
+		
+		.loading-spinner {
+			display: none;
+		}
+		
+		.loading .loading-spinner {
+			display: inline-block;
+		}
+		
+		.loading .btn-text {
+			display: none;
+		}
+		
+		@media (max-width: 768px) {
+			.table-responsive {
+				font-size: 0.875rem;
+			}
+		}
 
-        /* Audio Player Styles */
-        .audio-player-modal .modal-body {
-            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
-        }
+		/* Audio Player Styles */
+		.audio-player-modal .modal-body {
+			background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+		}
 
-        .audio-player-info {
-            background: white;
-            border-radius: 0.5rem;
-            padding: 1rem;
-            margin-bottom: 1rem;
-            box-shadow: 0 0.125rem 0.25rem rgba(0,0,0,0.075);
-        }
+		.audio-player-info {
+			background: white;
+			border-radius: 0.5rem;
+			padding: 1rem;
+			margin-bottom: 1rem;
+			box-shadow: 0 0.125rem 0.25rem rgba(0,0,0,0.075);
+		}
 
-        .audio-player-info .caller-name {
-            font-size: 1.25rem;
-            font-weight: 600;
-            color: var(--secondary-color);
-        }
+		.audio-player-info .caller-name {
+			font-size: 1.25rem;
+			font-weight: 600;
+			color: var(--secondary-color);
+		}
 
-        .audio-player-info .caller-details {
-            color: #6c757d;
-            font-size: 0.875rem;
-        }
+		.audio-player-info .caller-details {
+			color: #6c757d;
+			font-size: 0.875rem;
+		}
 
-        .audio-controls {
-            background: white;
-            border-radius: 0.5rem;
-            padding: 1rem;
-            box-shadow: 0 0.125rem 0.25rem rgba(0,0,0,0.075);
-        }
+		.audio-controls {
+			background: white;
+			border-radius: 0.5rem;
+			padding: 1rem;
+			box-shadow: 0 0.125rem 0.25rem rgba(0,0,0,0.075);
+		}
 
-        .audio-controls audio {
-            width: 100%;
-            outline: none;
-        }
+		.audio-controls audio {
+			width: 100%;
+			outline: none;
+		}
 
-        .btn-play {
-            padding: 0.25rem 0.5rem;
-            font-size: 0.875rem;
-        }
+		.btn-play {
+			padding: 0.25rem 0.5rem;
+			font-size: 0.875rem;
+		}
 
-        /* Forwarded By Filter Styles */
-        .filter-container {
-            background: #f8f9fa;
-            border-radius: 0.375rem;
-            padding: 0.75rem;
-            margin-bottom: 1rem;
-        }
+		/* Forwarded By Filter Styles */
+		.filter-container {
+			background: #f8f9fa;
+			border-radius: 0.375rem;
+			padding: 0.75rem;
+			margin-bottom: 1rem;
+		}
 
-        .filter-container .form-select {
-            max-width: 250px;
-        }
+		.filter-container .form-select {
+			max-width: 250px;
+		}
 
-        .filter-badge {
-            font-size: 0.75rem;
-            vertical-align: middle;
-        }
+		.filter-badge {
+			font-size: 0.75rem;
+			vertical-align: middle;
+		}
 
-        .voicemail-row.filtered-out {
-            display: none !important;
-        }
-    </style>
-    
-    {% block extra_css %}{% endblock %}
+		.voicemail-row.filtered-out {
+			display: none !important;
+		}
+	</style>
+	
+	{% block extra_css %}{% endblock %}
 </head>
 <body class="d-flex flex-column">
-    <!-- Navigation -->
-    <nav class="navbar navbar-expand-lg navbar-dark">
-        <div class="container">
-            <a class="navbar-brand" href="{{ url_for('index') }}">
-                <i class="bi bi-voicemail me-2"></i>
-                Voicemail Manager
-            </a>
-            
-            {% if session.get('access_token') %}
-            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
-                <span class="navbar-toggler-icon"></span>
-            </button>
-            <div class="collapse navbar-collapse" id="navbarNav">
-                <ul class="navbar-nav ms-auto">
-                    <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('dashboard') }}">
-                            <i class="bi bi-grid-3x3-gap-fill me-1"></i> Dashboard
-                        </a>
-                    </li>
+	<!-- Navigation -->
+	<nav class="navbar navbar-expand-lg navbar-dark">
+		<div class="container">
+			<a class="navbar-brand" href="{{ url_for('index') }}">
+				<i class="bi bi-voicemail me-2"></i>
+				Voicemail Manager
+			</a>
+			
+			{% if session.get('access_token') %}
+			<button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+				<span class="navbar-toggler-icon"></span>
+			</button>
+			<div class="collapse navbar-collapse" id="navbarNav">
+				<ul class="navbar-nav ms-auto">
+					<li class="nav-item">
+						<a class="nav-link" href="{{ url_for('dashboard') }}">
+							<i class="bi bi-grid-3x3-gap-fill me-1"></i> Dashboard
+						</a>
+					</li>
 					{# Download link hidden - legacy code kept #}
 					{#
 					<li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('download_page') }}">
-                            <i class="bi bi-download me-1"></i> Download
-                        </a>
-                    </li>
+						<a class="nav-link" href="{{ url_for('download_page') }}">
+							<i class="bi bi-download me-1"></i> Download
+						</a>
+					</li>
 					#}
-                    {% if current_mailbox is not defined or current_mailbox.type != 'group' %}
-                    <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('forward_page') }}">
-                            <i class="bi bi-forward me-1"></i> Forward
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('delete_page') }}">
-                            <i class="bi bi-trash me-1"></i> Delete
-                        </a>
-                    </li>
-                    {% endif %}
-                    <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('logout') }}">
-                            <i class="bi bi-box-arrow-right me-1"></i> Logout
-                        </a>
-                    </li>
-                </ul>
-            </div>
-            {% endif %}
-        </div>
-    </nav>
-    
-    <!-- Main Content -->
-    <main class="flex-grow-1">
-        <div class="container py-4">
-            <!-- Flash Messages -->
-            {% with messages = get_flashed_messages(with_categories=true) %}
-                {% if messages %}
-                    {% for category, message in messages %}
-                        <div class="alert alert-{{ category if category != 'message' else 'info' }} alert-dismissible fade show" role="alert">
-                            {{ message }}
-                            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-                        </div>
-                    {% endfor %}
-                {% endif %}
-            {% endwith %}
-            
-            {% block content %}{% endblock %}
-        </div>
-    </main>
-    
-    <!-- Footer -->
-    <footer class="footer">
-        <div class="container text-center">
-            <small>Internal Use Only | Developed by Filip Balakovski</small>
-        </div>
-    </footer>
-    
-    <!-- Audio Player Modal (Shared) -->
-    <div class="modal fade audio-player-modal" id="audioPlayerModal" tabindex="-1">
-        <div class="modal-dialog modal-dialog-centered">
-            <div class="modal-content">
-                <div class="modal-header" style="background: linear-gradient(135deg, var(--primary-color) 0%, #e6451c 100%); color: white;">
-                    <h5 class="modal-title">
-                        <i class="bi bi-play-circle me-2"></i>
-                        Play Voicemail
-                    </h5>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
-                </div>
-                <div class="modal-body">
-                    <div class="audio-player-info">
-                        <div class="d-flex align-items-center">
-                            <div class="flex-shrink-0">
-                                <i class="bi bi-person-circle fs-1 text-muted"></i>
-                            </div>
-                            <div class="flex-grow-1 ms-3">
-                                <div class="caller-name" id="audioPlayerCaller">Loading...</div>
-                                <div class="caller-details">
-                                    <i class="bi bi-clock me-1"></i>
-                                    <span id="audioPlayerDuration">--</span>
-                                    <span class="mx-2">|</span>
-                                    <i class="bi bi-calendar me-1"></i>
-                                    <span id="audioPlayerDate">--</span>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="audio-controls">
-                        <div id="audioLoading" class="text-center py-3">
-                            <div class="spinner-border text-primary" role="status">
-                                <span class="visually-hidden">Loading...</span>
-                            </div>
-                            <p class="mt-2 mb-0 text-muted">Fetching audio...</p>
-                        </div>
-                        <div id="audioPlayerContainer" style="display: none;">
-                            <audio id="audioPlayer" controls preload="metadata">
-                                Your browser does not support the audio element.
-                            </audio>
-                        </div>
-                        <div id="audioError" class="alert alert-danger mb-0" style="display: none;">
-                            <i class="bi bi-exclamation-triangle me-2"></i>
-                            <span id="audioErrorMessage">Failed to load audio</span>
-                        </div>
-                    </div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-                </div>
-            </div>
-        </div>
-    </div>
+					{% if current_mailbox is not defined or current_mailbox.type != 'group' %}
+					<li class="nav-item">
+						<a class="nav-link" href="{{ url_for('forward_page') }}">
+							<i class="bi bi-forward me-1"></i> Forward
+						</a>
+					</li>
+					<li class="nav-item">
+						<a class="nav-link" href="{{ url_for('delete_page') }}">
+							<i class="bi bi-trash me-1"></i> Delete
+						</a>
+					</li>
+					{% endif %}
+					<li class="nav-item">
+						<a class="nav-link" href="{{ url_for('logout') }}">
+							<i class="bi bi-box-arrow-right me-1"></i> Logout
+						</a>
+					</li>
+				</ul>
+			</div>
+			{% endif %}
+		</div>
+	</nav>
+	
+	<!-- Main Content -->
+	<main class="flex-grow-1">
+		<div class="container py-4">
+			<!-- Flash Messages -->
+			{% with messages = get_flashed_messages(with_categories=true) %}
+				{% if messages %}
+					{% for category, message in messages %}
+						<div class="alert alert-{{ category if category != 'message' else 'info' }} alert-dismissible fade show" role="alert">
+							{{ message }}
+							<button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+						</div>
+					{% endfor %}
+				{% endif %}
+			{% endwith %}
+			
+			{% block content %}{% endblock %}
+		</div>
+	</main>
+	
+	<!-- Footer -->
+	<footer class="footer">
+		<div class="container text-center">
+			<small>Internal Use Only | Developed by Filip Balakovski</small>
+		</div>
+	</footer>
+	
+	<!-- Audio Player Modal (Shared) -->
+	<div class="modal fade audio-player-modal" id="audioPlayerModal" tabindex="-1">
+		<div class="modal-dialog modal-dialog-centered">
+			<div class="modal-content">
+				<div class="modal-header" style="background: linear-gradient(135deg, var(--primary-color) 0%, #e6451c 100%); color: white;">
+					<h5 class="modal-title">
+						<i class="bi bi-play-circle me-2"></i>
+						Play Voicemail
+					</h5>
+					<button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+				</div>
+				<div class="modal-body">
+					<div class="audio-player-info">
+						<div class="d-flex align-items-center">
+							<div class="flex-shrink-0">
+								<i class="bi bi-person-circle fs-1 text-muted"></i>
+							</div>
+							<div class="flex-grow-1 ms-3">
+								<div class="caller-name" id="audioPlayerCaller">Loading...</div>
+								<div class="caller-details">
+									<i class="bi bi-clock me-1"></i>
+									<span id="audioPlayerDuration">--</span>
+									<span class="mx-2">|</span>
+									<i class="bi bi-calendar me-1"></i>
+									<span id="audioPlayerDate">--</span>
+								</div>
+							</div>
+						</div>
+					</div>
+					<div class="audio-controls">
+						<div id="audioLoading" class="text-center py-3">
+							<div class="spinner-border text-primary" role="status">
+								<span class="visually-hidden">Loading...</span>
+							</div>
+							<p class="mt-2 mb-0 text-muted">Fetching audio...</p>
+						</div>
+						<div id="audioPlayerContainer" style="display: none;">
+							<audio id="audioPlayer" controls preload="metadata">
+								Your browser does not support the audio element.
+							</audio>
+						</div>
+						<div id="audioError" class="alert alert-danger mb-0" style="display: none;">
+							<i class="bi bi-exclamation-triangle me-2"></i>
+							<span id="audioErrorMessage">Failed to load audio</span>
+						</div>
+					</div>
+				</div>
+				<div class="modal-footer">
+					<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+				</div>
+			</div>
+		</div>
+	</div>
 
-    <!-- Bootstrap JS -->
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+	<!-- Bootstrap JS -->
+	<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 
-    <!-- Shared Audio Player & Filter JavaScript -->
-    <script>
-    // ============================================
-    // AUDIO PLAYER FUNCTIONALITY
-    // ============================================
-    let currentAudioModal = null;
+	<!-- Shared Audio Player & Filter JavaScript -->
+	<script>
+	// ============================================
+	// AUDIO PLAYER FUNCTIONALITY
+	// ============================================
+	let currentAudioModal = null;
 
-    function playVoicemail(messageId, caller, duration, conversationId) {
-        // Look up original date from loaded dates dictionary
-        let displayDate = '--';
-        if (conversationId && window.loadedOriginalDates && window.loadedOriginalDates[conversationId]) {
-            // Use original date from fetched dictionary
-            const isoDate = window.loadedOriginalDates[conversationId];
-            try {
-                const dt = new Date(isoDate);
-                displayDate = dt.toLocaleString('en-US', {
-                    year: 'numeric', month: '2-digit', day: '2-digit',
-                    hour: '2-digit', minute: '2-digit', second: '2-digit'
-                });
-            } catch {
-                displayDate = isoDate;
-            }
-        }
+	function playVoicemail(messageId, caller, duration, conversationId) {
+		// Look up original date from loaded dates dictionary
+		let displayDate = '--';
+		if (conversationId && window.loadedOriginalDates && window.loadedOriginalDates[conversationId]) {
+			// Use original date from fetched dictionary
+			const isoDate = window.loadedOriginalDates[conversationId];
+			try {
+				const dt = new Date(isoDate);
+				displayDate = dt.toLocaleString('en-US', {
+					year: 'numeric', month: '2-digit', day: '2-digit',
+					hour: '2-digit', minute: '2-digit', second: '2-digit'
+				});
+			} catch {
+				displayDate = isoDate;
+			}
+		}
 
-        // Set info in modal
-        document.getElementById('audioPlayerCaller').textContent = caller || 'Unknown Caller';
-        document.getElementById('audioPlayerDuration').textContent = duration || '--';
-        document.getElementById('audioPlayerDate').textContent = displayDate;
+		// Set info in modal
+		document.getElementById('audioPlayerCaller').textContent = caller || 'Unknown Caller';
+		document.getElementById('audioPlayerDuration').textContent = duration || '--';
+		document.getElementById('audioPlayerDate').textContent = displayDate;
 
-        // Reset state
-        document.getElementById('audioLoading').style.display = 'block';
-        document.getElementById('audioPlayerContainer').style.display = 'none';
-        document.getElementById('audioError').style.display = 'none';
+		// Reset state
+		document.getElementById('audioLoading').style.display = 'block';
+		document.getElementById('audioPlayerContainer').style.display = 'none';
+		document.getElementById('audioError').style.display = 'none';
 
-        // Get audio element
-        const audio = document.getElementById('audioPlayer');
-        audio.pause();
-        audio.src = '';
+		// Get audio element
+		const audio = document.getElementById('audioPlayer');
+		audio.pause();
+		audio.src = '';
 
-        // Show modal
-        currentAudioModal = new bootstrap.Modal(document.getElementById('audioPlayerModal'));
-        currentAudioModal.show();
+		// Show modal
+		currentAudioModal = new bootstrap.Modal(document.getElementById('audioPlayerModal'));
+		currentAudioModal.show();
 
-        // Fetch fresh media URL
-        fetch(`/api/voicemail/${messageId}/media-url`)
-            .then(response => response.json())
-            .then(data => {
-                if (data.success && data.mediaUrl) {
-                    audio.src = data.mediaUrl;
-                    document.getElementById('audioLoading').style.display = 'none';
-                    document.getElementById('audioPlayerContainer').style.display = 'block';
+		// Fetch fresh media URL
+		fetch(`/api/voicemail/${messageId}/media-url`)
+			.then(response => response.json())
+			.then(data => {
+				if (data.success && data.mediaUrl) {
+					audio.src = data.mediaUrl;
+					document.getElementById('audioLoading').style.display = 'none';
+					document.getElementById('audioPlayerContainer').style.display = 'block';
 
-                    // Auto-play
-                    audio.play().catch(err => {
-                        console.log('Auto-play prevented:', err);
-                        // User can click play manually
-                    });
-                } else {
-                    showAudioError(data.error || 'Failed to get media URL');
-                }
-            })
-            .catch(error => {
-                console.error('Error fetching media URL:', error);
-                showAudioError('Network error - please try again');
-            });
-    }
+					// Auto-play
+					audio.play().catch(err => {
+						console.log('Auto-play prevented:', err);
+						// User can click play manually
+					});
+				} else {
+					showAudioError(data.error || 'Failed to get media URL');
+				}
+			})
+			.catch(error => {
+				console.error('Error fetching media URL:', error);
+				showAudioError('Network error - please try again');
+			});
+	}
 
-    function showAudioError(message) {
-        document.getElementById('audioLoading').style.display = 'none';
-        document.getElementById('audioPlayerContainer').style.display = 'none';
-        document.getElementById('audioError').style.display = 'block';
-        document.getElementById('audioErrorMessage').textContent = message;
-    }
+	function showAudioError(message) {
+		document.getElementById('audioLoading').style.display = 'none';
+		document.getElementById('audioPlayerContainer').style.display = 'none';
+		document.getElementById('audioError').style.display = 'block';
+		document.getElementById('audioErrorMessage').textContent = message;
+	}
 
-    // Stop audio when modal is closed
-    document.getElementById('audioPlayerModal').addEventListener('hidden.bs.modal', function() {
-        const audio = document.getElementById('audioPlayer');
-        audio.pause();
-        audio.src = '';
-    });
+	// Stop audio when modal is closed
+	document.getElementById('audioPlayerModal').addEventListener('hidden.bs.modal', function() {
+		const audio = document.getElementById('audioPlayer');
+		audio.pause();
+		audio.src = '';
+	});
 
-    // ============================================
-    // FORWARDED BY FILTER FUNCTIONALITY
-    // ============================================
-    function initForwardedByFilter() {
-        const filterSelect = document.getElementById('forwardedByFilter');
-        if (!filterSelect) return;
+	// ============================================
+	// FORWARDED BY FILTER FUNCTIONALITY
+	// ============================================
+	function initForwardedByFilter() {
+		const filterSelect = document.getElementById('forwardedByFilter');
+		if (!filterSelect) return;
 
-        // Collect unique "Forwarded By" values from table
-        const forwardedByValues = new Set();
-        document.querySelectorAll('.voicemail-row').forEach(row => {
-            const forwardedBy = row.dataset.forwardedBy;
-            if (forwardedBy && forwardedBy !== '-' && forwardedBy !== '') {
-                forwardedByValues.add(forwardedBy);
-            }
-        });
+		// Collect unique "Forwarded By" values from table
+		const forwardedByValues = new Set();
+		document.querySelectorAll('.voicemail-row').forEach(row => {
+			const forwardedBy = row.dataset.forwardedBy;
+			if (forwardedBy && forwardedBy !== '-' && forwardedBy !== '') {
+				forwardedByValues.add(forwardedBy);
+			}
+		});
 
-        // Sort alphabetically
-        const sortedValues = Array.from(forwardedByValues).sort((a, b) =>
-            a.toLowerCase().localeCompare(b.toLowerCase())
-        );
+		// Sort alphabetically
+		const sortedValues = Array.from(forwardedByValues).sort((a, b) =>
+			a.toLowerCase().localeCompare(b.toLowerCase())
+		);
 
-        // Populate dropdown
-        sortedValues.forEach(value => {
-            const option = document.createElement('option');
-            option.value = value;
-            option.textContent = value;
-            filterSelect.appendChild(option);
-        });
+		// Populate dropdown
+		sortedValues.forEach(value => {
+			const option = document.createElement('option');
+			option.value = value;
+			option.textContent = value;
+			filterSelect.appendChild(option);
+		});
 
-        // Hide filter if no values
-        if (sortedValues.length === 0) {
-            const filterContainer = document.getElementById('forwardedByFilterContainer');
-            if (filterContainer) {
-                filterContainer.style.display = 'none';
-            }
-        }
-    }
+		// Hide filter if no values
+		if (sortedValues.length === 0) {
+			const filterContainer = document.getElementById('forwardedByFilterContainer');
+			if (filterContainer) {
+				filterContainer.style.display = 'none';
+			}
+		}
+	}
 
-    function filterByForwardedBy() {
-        const filterSelect = document.getElementById('forwardedByFilter');
-        if (!filterSelect) return;
+	function filterByForwardedBy() {
+		const filterSelect = document.getElementById('forwardedByFilter');
+		if (!filterSelect) return;
 
-        const selectedValue = filterSelect.value;
-        const filterStatus = document.getElementById('filterStatus');
-        let visibleCount = 0;
-        let totalCount = 0;
+		const selectedValue = filterSelect.value;
+		const filterStatus = document.getElementById('filterStatus');
+		let visibleCount = 0;
+		let totalCount = 0;
 
-        document.querySelectorAll('.voicemail-row').forEach(row => {
-            totalCount++;
-            const forwardedBy = row.dataset.forwardedBy || '';
+		document.querySelectorAll('.voicemail-row').forEach(row => {
+			totalCount++;
+			const forwardedBy = row.dataset.forwardedBy || '';
 
-            if (selectedValue === '' || forwardedBy === selectedValue) {
-                row.classList.remove('filtered-out');
-                visibleCount++;
-            } else {
-                row.classList.add('filtered-out');
-            }
-        });
+			if (selectedValue === '' || forwardedBy === selectedValue) {
+				row.classList.remove('filtered-out');
+				visibleCount++;
+			} else {
+				row.classList.add('filtered-out');
+			}
+		});
 
-        // Update filter status
-        if (filterStatus) {
-            if (selectedValue === '') {
-                filterStatus.innerHTML = '';
-            } else {
-                filterStatus.innerHTML = `<span class="badge bg-info filter-badge ms-2">Showing ${visibleCount} of ${totalCount}</span>`;
-            }
-        }
+		// Update filter status
+		if (filterStatus) {
+			if (selectedValue === '') {
+				filterStatus.innerHTML = '';
+			} else {
+				filterStatus.innerHTML = `<span class="badge bg-info filter-badge ms-2">Showing ${visibleCount} of ${totalCount}</span>`;
+			}
+		}
 
-        // Update row numbers
-        updateRowNumbers();
+		// Update row numbers
+		updateRowNumbers();
 
-        // Update selected count if applicable
-        if (typeof updateSelectedCount === 'function') {
-            updateSelectedCount();
-        }
-    }
+		// Update selected count if applicable
+		if (typeof updateSelectedCount === 'function') {
+			updateSelectedCount();
+		}
+	}
 
-    function clearFilter() {
-        const filterSelect = document.getElementById('forwardedByFilter');
-        if (filterSelect) {
-            filterSelect.value = '';
-            filterByForwardedBy();
-        }
-    }
+	function clearFilter() {
+		const filterSelect = document.getElementById('forwardedByFilter');
+		if (filterSelect) {
+			filterSelect.value = '';
+			filterByForwardedBy();
+		}
+	}
 
-    function updateRowNumbers() {
-        let visibleIndex = 0;
-        document.querySelectorAll('.voicemail-row').forEach(row => {
-            if (!row.classList.contains('filtered-out')) {
-                visibleIndex++;
-                const indexCell = row.querySelector('.row-number-cell');
-                if (indexCell) {
-                    indexCell.textContent = visibleIndex;
-                }
-            }
-        });
-    }
+	function updateRowNumbers() {
+		let visibleIndex = 0;
+		document.querySelectorAll('.voicemail-row').forEach(row => {
+			if (!row.classList.contains('filtered-out')) {
+				visibleIndex++;
+				const indexCell = row.querySelector('.row-number-cell');
+				if (indexCell) {
+					indexCell.textContent = visibleIndex;
+				}
+			}
+		});
+	}
 
-    // Initialize filter on page load if container exists
-    document.addEventListener('DOMContentLoaded', function() {
-        initForwardedByFilter();
-    });
+	// Initialize filter on page load if container exists
+	document.addEventListener('DOMContentLoaded', function() {
+		initForwardedByFilter();
+	});
 
-    // ============================================
-    // LAZY LOAD ORIGINAL DATES (OPTIMIZED)
-    // ============================================
+	// ============================================
+	// LAZY LOAD ORIGINAL DATES (OPTIMIZED)
+	// ============================================
 
-    // Global storage for loaded original dates (used by playVoicemail and filters)
-    window.loadedOriginalDates = window.loadedOriginalDates || {};
+	// Global storage for loaded original dates (used by playVoicemail and filters)
+	window.loadedOriginalDates = window.loadedOriginalDates || {};
 
-    // Track if dates have been loaded to avoid duplicate fetches
-    window.originalDatesLoaded = window.originalDatesLoaded || false;
+	// Track if dates have been loaded to avoid duplicate fetches
+	window.originalDatesLoaded = window.originalDatesLoaded || false;
 
-    /**
-     * Format ISO date string to human-readable format
-     */
-    function formatOriginalDate(isoString) {
-        try {
-            const dt = new Date(isoString);
-            return dt.toLocaleString('en-US', {
-                year: 'numeric', month: '2-digit', day: '2-digit',
-                hour: '2-digit', minute: '2-digit', second: '2-digit'
-            });
-        } catch {
-            return isoString;
-        }
-    }
+	/**
+	 * Format ISO date string to human-readable format
+	 */
+	function formatOriginalDate(isoString) {
+		try {
+			const dt = new Date(isoString);
+			return dt.toLocaleString('en-US', {
+				year: 'numeric', month: '2-digit', day: '2-digit',
+				hour: '2-digit', minute: '2-digit', second: '2-digit'
+			});
+		} catch {
+			return isoString;
+		}
+	}
 
-    /**
-     * Show loading overlay on the voicemail table
-     */
-    function showTableLoadingOverlay(show) {
-        let overlay = document.getElementById('originalDatesLoadingOverlay');
-        const table = document.querySelector('.table-responsive') || document.querySelector('table');
+	/**
+	 * Show loading overlay on the voicemail table
+	 */
+	function showTableLoadingOverlay(show) {
+		let overlay = document.getElementById('originalDatesLoadingOverlay');
+		const table = document.querySelector('.table-responsive') || document.querySelector('table');
 
-        if (!table) return;
+		if (!table) return;
 
-        if (show) {
-            if (!overlay) {
-                overlay = document.createElement('div');
-                overlay.id = 'originalDatesLoadingOverlay';
-                overlay.style.cssText = `
-                    position: absolute;
-                    top: 0;
-                    left: 0;
-                    right: 0;
-                    bottom: 0;
-                    background: rgba(255, 255, 255, 0.8);
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    z-index: 1000;
-                    border-radius: 0.375rem;
-                `;
-                overlay.innerHTML = `
-                    <div class="text-center">
-                        <div class="spinner-border text-primary mb-2" role="status">
-                            <span class="visually-hidden">Loading...</span>
-                        </div>
-                        <div class="text-muted small">Loading original dates...</div>
-                    </div>
-                `;
+		if (show) {
+			if (!overlay) {
+				overlay = document.createElement('div');
+				overlay.id = 'originalDatesLoadingOverlay';
+				overlay.style.cssText = `
+					position: absolute;
+					top: 0;
+					left: 0;
+					right: 0;
+					bottom: 0;
+					background: rgba(255, 255, 255, 0.8);
+					display: flex;
+					align-items: center;
+					justify-content: center;
+					z-index: 1000;
+					border-radius: 0.375rem;
+				`;
+				overlay.innerHTML = `
+					<div class="text-center">
+						<div class="spinner-border text-primary mb-2" role="status">
+							<span class="visually-hidden">Loading...</span>
+						</div>
+						<div class="text-muted small">Loading original dates...</div>
+					</div>
+				`;
 
-                // Make table container relative for overlay positioning
-                const container = table.closest('.table-responsive') || table.parentElement;
-                if (container) {
-                    container.style.position = 'relative';
-                    container.appendChild(overlay);
-                }
-            }
-            overlay.style.display = 'flex';
-        } else {
-            if (overlay) {
-                overlay.style.display = 'none';
-            }
-        }
-    }
+				// Make table container relative for overlay positioning
+				const container = table.closest('.table-responsive') || table.parentElement;
+				if (container) {
+					container.style.position = 'relative';
+					container.appendChild(overlay);
+				}
+			}
+			overlay.style.display = 'flex';
+		} else {
+			if (overlay) {
+				overlay.style.display = 'none';
+			}
+		}
+	}
 
-    /**
-     * Load original dates for all forwarded voicemails in a single API call.
-     *
-     * Optimizations:
-     * - Single API call with all conversation_ids (backend handles pagination)
-     * - Builds cellMap upfront before API call
-     * - Batch DOM updates using requestAnimationFrame
-     * - Shows loading overlay during fetch
-     * - Preserves window.loadedOriginalDates for filter/audio player
-     */
-    async function loadOriginalDates() {
-        // Skip if already loaded
-        if (window.originalDatesLoaded) {
-            console.log('Original dates already loaded, skipping');
-            return;
-        }
+	/**
+	 * Load original dates for all forwarded voicemails in a single API call.
+	 *
+	 * Optimizations:
+	 * - Single API call with all conversation_ids (backend handles pagination)
+	 * - Builds cellMap upfront before API call
+	 * - Batch DOM updates using requestAnimationFrame
+	 * - Shows loading overlay during fetch
+	 * - Preserves window.loadedOriginalDates for filter/audio player
+	 */
+	async function loadOriginalDates() {
+		if (window.originalDatesLoaded) {
+			return;
+		}
 
-        // Build map of conversationId -> array of cells UPFRONT (before API call)
-        const cellMap = new Map();
-        const conversationIds = [];
+		const cellMap = new Map();
+		const forwarderCellMap = new Map();
+		const conversationIds = [];
 
-        document.querySelectorAll('.voicemail-row').forEach(row => {
-            const convId = row.dataset.conversationId;
-            const isForwarded = row.dataset.isForwarded === 'true';
+		document.querySelectorAll('.voicemail-row').forEach(row => {
+			const convId = row.dataset.conversationId;
+			const isForwarded = row.dataset.isForwarded === 'true';
 
-            if (convId && isForwarded) {
-                const cell = row.querySelector('.original-date-cell');
-                if (cell) {
-                    if (!cellMap.has(convId)) {
-                        cellMap.set(convId, []);
-                        conversationIds.push(convId);
-                    }
-                    cellMap.get(convId).push(cell);
-                }
-            }
-        });
+			if (convId) {
+				// Date cells
+				const dateCell = row.querySelector('.original-date-cell');
+				if (dateCell && isForwarded) {
+					if (!cellMap.has(convId)) {
+						cellMap.set(convId, []);
+						conversationIds.push(convId);
+					}
+					cellMap.get(convId).push(dateCell);
+				}
+				
+				// Forwarder cells - look for "Deleted User" text
+				const forwarderCell = row.querySelector('td:nth-child(5)'); // Forwarded By column
+				if (forwarderCell && forwarderCell.textContent.trim() === 'Deleted User') {
+					const shortId = convId.substring(0, 8);
+					if (!forwarderCellMap.has(shortId)) {
+						forwarderCellMap.set(shortId, []);
+					}
+					forwarderCellMap.get(shortId).push(forwarderCell);
+				}
+			}
+		});
 
-        if (conversationIds.length === 0) {
-            console.log('No original dates to load');
-            window.originalDatesLoaded = true;
-            return;
-        }
+		if (conversationIds.length === 0) {
+			window.originalDatesLoaded = true;
+			return;
+		}
 
-        console.log(`Loading original dates for ${conversationIds.length} voicemails (single API call)`);
+		showTableLoadingOverlay(true);
 
-        // Show loading overlay
-        showTableLoadingOverlay(true);
+		try {
+			const response = await fetch('/api/load-original-dates', {
+				method: 'POST',
+				headers: {'Content-Type': 'application/json'},
+				body: JSON.stringify({conversation_ids: conversationIds})
+			});
 
-        try {
-            const response = await fetch('/api/load-original-dates', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({conversation_ids: conversationIds})
-            });
+			const data = await response.json();
 
-            const data = await response.json();
+			if (!data.success) {
+				showTableLoadingOverlay(false);
+				return;
+			}
 
-            if (!data.success) {
-                console.error('Failed to load original dates:', data.error);
-                // Mark all cells as failed
-                requestAnimationFrame(() => {
-                    cellMap.forEach((cells) => {
-                        cells.forEach(cell => {
-                            cell.innerHTML = '<small class="text-muted">-</small>';
-                        });
-                    });
-                    showTableLoadingOverlay(false);
-                });
-                return;
-            }
+			requestAnimationFrame(() => {
+				// Update dates
+				const dates = data.dates || {};
+				cellMap.forEach((cells, convId) => {
+					const date = dates[convId];
+					if (date) {
+						window.loadedOriginalDates[convId] = date;
+						const formattedDate = formatOriginalDate(date);
+						cells.forEach(cell => {
+							cell.innerHTML = `<small class="text-success">${formattedDate}</small>`;
+						});
+					} else {
+						cells.forEach(cell => {
+							cell.innerHTML = '<small class="text-muted">-</small>';
+						});
+					}
+				});
 
-            // Batch update all cells in single requestAnimationFrame
-            requestAnimationFrame(() => {
-                const dates = data.dates || {};
+				// Update forwarders
+				const forwarders = data.forwarders || {};
+				forwarderCellMap.forEach((cells, shortId) => {
+					const name = forwarders[shortId];
+					if (name) {
+						cells.forEach(cell => {
+							cell.textContent = name;
+						});
+					}
+				});
 
-                cellMap.forEach((cells, convId) => {
-                    const date = dates[convId];
+				showTableLoadingOverlay(false);
+			});
 
-                    if (date) {
-                        // Store in global dictionary for audio player and filters
-                        window.loadedOriginalDates[convId] = date;
-                        const formattedDate = formatOriginalDate(date);
-                        cells.forEach(cell => {
-                            cell.innerHTML = `<small class="text-success">${formattedDate}</small>`;
-                        });
-                    } else {
-                        cells.forEach(cell => {
-                            cell.innerHTML = '<small class="text-muted">-</small>';
-                        });
-                    }
-                });
+			window.originalDatesLoaded = true;
 
-                // Hide loading overlay
-                showTableLoadingOverlay(false);
+		} catch (error) {
+			console.error('Error fetching metadata:', error);
+			showTableLoadingOverlay(false);
+		}
+	}
+	// Backward compatibility alias
+	function loadOriginalDatesChunked() {
+		return loadOriginalDates();
+	}
+	</script>
 
-                console.log(`Original dates loaded: ${data.fetched} found, ${data.not_found} not found (${data.datatable_rows} total in datatable)`);
-            });
-
-            window.originalDatesLoaded = true;
-
-        } catch (error) {
-            console.error('Error fetching original dates:', error);
-            // Mark all cells as failed
-            requestAnimationFrame(() => {
-                cellMap.forEach((cells) => {
-                    cells.forEach(cell => {
-                        cell.innerHTML = '<small class="text-muted">-</small>';
-                    });
-                });
-                showTableLoadingOverlay(false);
-            });
-        }
-    }
-
-    // Backward compatibility alias
-    function loadOriginalDatesChunked() {
-        return loadOriginalDates();
-    }
-    </script>
-
-    {% block extra_js %}{% endblock %}
+	{% block extra_js %}{% endblock %}
 </body>
 </html>

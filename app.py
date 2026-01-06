@@ -777,16 +777,9 @@ def format_voicemail(vm, access_token, region_host, load_original_dates=False):
 		forwarded_by = copied_from_user.get('name') or 'Deleted User'
 		original_date = embedded_date if embedded_date else copied_from.get('date')
 	elif is_group_vm:
-		# Deleted user case - no copiedFrom but VM is in group mailbox
 		is_forwarded = True
 		original_date = embedded_date
-		
-		# Try to get forwarder name from cache DT
-		if conversation_id:
-			forwarded_by = get_forwarder_from_cache(access_token, region_host, conversation_id[:8])
-		
-		if not forwarded_by:
-			forwarded_by = 'Deleted User'
+		forwarded_by = 'Deleted User'  # Will be updated by frontend bulk load
 
 	# Load original date from DT if missing
 	if load_original_dates and not original_date and conversation_id and DATATABLE_ID:
@@ -893,6 +886,35 @@ def cleanup_old_exports():
 				shutil.rmtree(item_path, ignore_errors=True)
 	except Exception as e:
 		app.logger.error(f"Cleanup error: {e}")
+
+def get_all_forwarder_cache(access_token, region_host):
+	"""Fetch all rows from forwarder cache DT"""
+	if not FORWARDER_CACHE_DT_ID:
+		return {}
+	
+	all_rows = {}
+	url = f"https://api.{region_host}/api/v2/flows/datatables/{FORWARDER_CACHE_DT_ID}/rows?showbrief=false&pageSize=500"
+	
+	while url:
+		response_data, error = make_api_request(url, access_token)
+		
+		if error or not response_data:
+			break
+		
+		for row in response_data.get('entities', []):
+			key = row.get('key')
+			name = row.get('forwarderName')
+			if key and name:
+				all_rows[key] = name
+		
+		next_uri = response_data.get('nextUri')
+		if next_uri:
+			url = f"https://api.{region_host}{next_uri}"
+			time.sleep(API_DELAY_DATATABLE)
+		else:
+			url = None
+	
+	return all_rows
 
 # ============================================================================
 # FLASK ROUTES
@@ -1231,89 +1253,49 @@ def get_voicemail_media_url(message_id):
 @app.route('/api/load-original-dates', methods=['POST'])
 @login_required
 def load_original_dates():
-	"""
-	Load original dates from data table for voicemails.
-
-	Optimized approach:
-	- Accepts all conversation_ids at once (no chunking needed)
-	- Fetches entire datatable in paginated calls (500 rows/page, ~8 API calls max for 4000 records)
-	- Returns all matching dates in single response
-	- No artificial delays - relies on make_api_request retry logic for rate limits
-	"""
 	data = request.get_json()
 	conversation_ids = data.get('conversation_ids', [])
-
-	if not DATATABLE_ID:
-		return jsonify({'success': False, 'error': 'Data table not configured'}), 400
-
-	if not conversation_ids:
-		return jsonify({'success': False, 'error': 'No conversation IDs provided'}), 400
 
 	access_token = session.get('access_token')
 	region_host = session.get('region_host')
 
-	# Deduplicate conversation IDs to avoid duplicate lookups
-	unique_conv_ids = set(conversation_ids)
-
-	app.logger.info(f"Loading original dates for {len(unique_conv_ids)} unique conversations...")
-
-	# Fetch all rows from datatable using bulk endpoint with pagination (500 rows/page)
-	all_rows = {}
-	url = f"https://api.{region_host}/api/v2/flows/datatables/{DATATABLE_ID}/rows?showbrief=false&pageSize=500"
-	page_count = 0
-
-	while url:
-		page_count += 1
-		response_data, error = make_api_request(url, access_token)
-
-		if error:
-			app.logger.error(f"Error fetching datatable rows (page {page_count}): {error}")
-			break
-
-		if not response_data:
-			break
-
-		# Extract rows from response - entities contains the row data
-		entities = response_data.get('entities', [])
-		for row in entities:
-			row_key = row.get('key')
-			original_date = row.get('originalCreatedDate')
-			if row_key and original_date:
-				all_rows[row_key] = original_date
-
-		app.logger.info(f"Fetched datatable page {page_count}: {len(entities)} rows (total: {len(all_rows)})")
-
-		# Check for next page
-		next_uri = response_data.get('nextUri')
-		if next_uri:
-			# nextUri is a relative path, construct full URL
-			url = f"https://api.{region_host}{next_uri}"
-			time.sleep(API_DELAY_DATATABLE)
-		else:
-			url = None
-
-	# Match requested conversation IDs with fetched data
-	results = {}
-	fetched = 0
-	not_found = 0
-
-	for conv_id in unique_conv_ids:
-		if conv_id in all_rows:
-			results[conv_id] = all_rows[conv_id]
-			fetched += 1
-		else:
-			not_found += 1
-
-	app.logger.info(f"Original dates loaded: {fetched} found, {not_found} not found ({page_count} API pages fetched)")
-
-	return jsonify({
+	results = {
 		'success': True,
-		'dates': results,
-		'fetched': fetched,
-		'not_found': not_found,
-		'total_requested': len(unique_conv_ids),
-		'datatable_rows': len(all_rows)
-	})
+		'dates': {},
+		'forwarders': {}
+	}
+
+	# Fetch original dates (existing logic)
+	if DATATABLE_ID and conversation_ids:
+		all_date_rows = {}
+		url = f"https://api.{region_host}/api/v2/flows/datatables/{DATATABLE_ID}/rows?showbrief=false&pageSize=500"
+		
+		while url:
+			response_data, error = make_api_request(url, access_token)
+			if error or not response_data:
+				break
+			
+			for row in response_data.get('entities', []):
+				key = row.get('key')
+				date = row.get('originalCreatedDate')
+				if key and date:
+					all_date_rows[key] = date
+			
+			next_uri = response_data.get('nextUri')
+			url = f"https://api.{region_host}{next_uri}" if next_uri else None
+			if next_uri:
+				time.sleep(API_DELAY_DATATABLE)
+		
+		# Match requested conversation IDs
+		for conv_id in set(conversation_ids):
+			if conv_id in all_date_rows:
+				results['dates'][conv_id] = all_date_rows[conv_id]
+
+	# Fetch forwarder cache (new)
+	forwarder_cache = get_all_forwarder_cache(access_token, region_host)
+	results['forwarders'] = forwarder_cache
+
+	return jsonify(results)
 
 @app.route('/logout')
 def logout():
