@@ -966,7 +966,7 @@ def dashboard():
 
 	# Bulk fetch user name cache for efficient forwarded_by lookups
 	user_cache = fetch_all_user_names_cache(token, host)
-	formatted = [format_voicemail(vm, token, host, load_original_dates=False, user_cache_dict=user_cache) for vm in voicemails]
+	formatted = [format_voicemail(vm, token, host, load_original_dates=False) for vm in voicemails]
 	total_sec = sum(vm.get('audioRecordingDurationSeconds', 0) or 0 for vm in voicemails)
 
 	# For group mailboxes, show all voicemails; for user mailboxes, show preview of 20
