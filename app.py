@@ -726,7 +726,92 @@ def process_voicemails_in_batches(access_token, region_host, voicemails_data, op
 # HELPERS
 # ============================================================================
 
+def format_voicemail(vm, access_token, region_host, load_original_dates=False, user_cache_dict=None):
+	"""Format voicemail with full date and forwarding info"""
+	created = vm.get('createdDate', '')
+	modified = vm.get('modifiedDate', '')
 
+	caller_name = vm.get('callerName', '')
+	caller_address = vm.get('callerAddress', '')
+
+	# Parse embedded original timestamp (legacy support)
+	embedded_date = None
+	source_field = caller_name if caller_name else caller_address
+
+	if source_field and source_field.startswith('[') and ']' in source_field:
+		try:
+			end_bracket = source_field.index(']')
+			embedded_date = source_field[1:end_bracket].strip()
+			source_field = source_field[end_bracket + 1:].strip()
+		except:
+			pass
+
+	original_caller = caller_name if caller_name else source_field if source_field else 'Unknown'
+
+	copied_from = vm.get('copiedFrom')
+	is_forwarded = copied_from is not None
+	forwarded_by = None
+	original_date = None
+
+	conversation_id = vm.get('conversation', {}).get('id')
+
+	if is_forwarded:
+		# Look up forwarded_by from UserNameCache datatable
+		user_id = copied_from.get('user', {}).get('id')
+		if user_id:
+			# Use bulk cache if provided, otherwise fall back to individual lookup
+			if user_cache_dict is not None:
+				cached_name = user_cache_dict.get(user_id)
+			else:
+				cached_name = lookup_user_name_from_cache(access_token, region_host, user_id)
+			forwarded_by = cached_name if cached_name else 'Unknown'
+		else:
+			forwarded_by = 'Unknown'
+
+		# Fallback chain: embedded -> copiedFrom.date -> datatable
+		original_date = embedded_date if embedded_date else copied_from.get('date')
+
+		if load_original_dates and not original_date and conversation_id and DATATABLE_ID:
+			original_date = get_original_date(access_token, region_host, DATATABLE_ID, conversation_id)
+			time.sleep(API_DELAY_DATATABLE)
+
+	copied_to = vm.get('copiedTo', [])
+	forwarded_to_name = None
+	forwarded_status_date = None
+
+	if copied_to:
+		copied_to.sort(key=lambda x: x.get('date', ''), reverse=True)
+		latest_forward = copied_to[0]
+
+		if latest_forward.get('group'):
+			forwarded_to_name = latest_forward['group'].get('name')
+		elif latest_forward.get('user'):
+			forwarded_to_name = latest_forward['user'].get('name')
+		
+		raw_fw_date = latest_forward.get('date')
+		if raw_fw_date:
+			forwarded_status_date = format_datetime(raw_fw_date)
+
+	return {
+		'id': vm.get('id'),
+		'id_short': vm.get('id', '')[:8],
+		'original_caller': original_caller,
+		'caller_name': caller_name,
+		'created_date': format_datetime(created),
+		'created_date_raw': created,
+		'original_date': format_datetime(original_date) if original_date else None,
+		'original_date_raw': original_date,
+		'modified_date': format_datetime(modified) if modified else None,
+		'duration': format_duration(vm.get('audioRecordingDurationSeconds')),
+		'duration_seconds': vm.get('audioRecordingDurationSeconds'),
+		'read': vm.get('read', False),
+		'is_forwarded': is_forwarded,
+		'forwarded_by': forwarded_by,
+		'forwarded_to': forwarded_to_name,
+		'forwarded_status_date': forwarded_status_date,
+		'filename': format_filename(vm),
+		'conversation_id': conversation_id,
+	}
 
 def format_filename(voicemail):
 	"""Generate filename with both created and modified dates if different"""
