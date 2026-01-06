@@ -201,18 +201,42 @@ def fetch_all_user_names_cache(access_token, region_host):
 	app.logger.info(f"User name cache loaded: {len(all_users)} users ({page_count} pages)")
 	return all_users
 
-def get_forwarder_from_cache(access_token, region_host, conversation_id_short):
-	"""Look up forwarder name from cache DT using first 8 chars of conversationId"""
-	if not DELETED_FORWARDER_CACHE_ID or not conversation_id_short:
-		return None
-	
-	url = f"https://api.{region_host}/api/v2/flows/datatables/{DELETED_FORWARDER_CACHE_ID}/rows/{conversation_id_short}?showbrief=false"
-	data, error = make_api_request(url, access_token)
-	
-	if error:
-		return None
-	
-	return data.get('forwarderName')
+def fetch_all_deleted_forwarder_cache(access_token, region_host):
+	"""Bulk fetch entire DeletedForwarderCache datatable. Returns dict {conversation_id_short: forwarderName}."""
+	if not DELETED_FORWARDER_CACHE_ID:
+		return {}
+
+	all_forwarders = {}
+	url = f"https://api.{region_host}/api/v2/flows/datatables/{DELETED_FORWARDER_CACHE_ID}/rows?showbrief=false&pageSize=500"
+	page_count = 0
+
+	while url:
+		page_count += 1
+		response_data, error = make_api_request(url, access_token)
+
+		if error:
+			app.logger.error(f"Error fetching deleted forwarder cache (page {page_count}): {error}")
+			break
+
+		if not response_data:
+			break
+
+		entities = response_data.get('entities', [])
+		for row in entities:
+			conv_id_short = row.get('key')
+			forwarder_name = row.get('forwarderName')
+			if conv_id_short and forwarder_name:
+				all_forwarders[conv_id_short] = forwarder_name
+
+		next_uri = response_data.get('nextUri')
+		if next_uri:
+			url = f"https://api.{region_host}{next_uri}"
+			time.sleep(API_DELAY_DATATABLE)
+		else:
+			url = None
+
+	app.logger.info(f"Deleted forwarder cache loaded: {len(all_forwarders)} records ({page_count} pages)")
+	return all_forwarders
 
 # ============================================================================
 # AUTHENTICATION HELPERS
@@ -740,7 +764,7 @@ def process_voicemails_in_batches(access_token, region_host, voicemails_data, op
 # HELPERS
 # ============================================================================
 
-def format_voicemail(vm, access_token, region_host, load_original_dates=False):
+def format_voicemail(vm, access_token, region_host, load_original_dates=False, deleted_forwarder_cache=None):
 	"""Format voicemail with full date and forwarding info"""
 	created = vm.get('createdDate', '')
 	modified = vm.get('modifiedDate', '')
@@ -770,23 +794,26 @@ def format_voicemail(vm, access_token, region_host, load_original_dates=False):
 	
 	conversation_id = vm.get('conversation', {}).get('id')
 	
-	if copied_from:
-		# Normal case - copiedFrom exists (active user)
+	# Priority 1: Check deleted forwarder cache first
+	if conversation_id and deleted_forwarder_cache:
+		cached_forwarder = deleted_forwarder_cache.get(conversation_id[:8])
+		if cached_forwarder:
+			is_forwarded = True
+			forwarded_by = cached_forwarder
+			original_date = embedded_date
+	
+	# Priority 2: Fall back to copiedFrom from API
+	if not forwarded_by and copied_from:
 		is_forwarded = True
 		copied_from_user = copied_from.get('user', {})
-		forwarded_by = copied_from_user.get('name') or 'Deleted User'
+		forwarded_by = copied_from_user.get('name') or 'Unknown'
 		original_date = embedded_date if embedded_date else copied_from.get('date')
-	elif is_group_vm:
-		# Deleted user case - no copiedFrom but VM is in group mailbox
+	
+	# Priority 3: Group VM without any forwarder info
+	if not forwarded_by and is_group_vm:
 		is_forwarded = True
+		forwarded_by = 'Unknown'
 		original_date = embedded_date
-		
-		# Try to get forwarder name from cache DT
-		if conversation_id:
-			forwarded_by = get_forwarder_from_cache(access_token, region_host, conversation_id[:8])
-		
-		if not forwarded_by:
-			forwarded_by = 'Deleted User'
 
 	# Load original date from DT if missing
 	if load_original_dates and not original_date and conversation_id and DATATABLE_ID:
@@ -984,12 +1011,14 @@ def dashboard():
 		flash(f"Error fetching voicemails: {error}", 'warning')
 		voicemails = []
 
-	# Bulk fetch user name cache for efficient forwarded_by lookups
-	user_cache = fetch_all_user_names_cache(token, host)
-	formatted = [format_voicemail(vm, token, host, load_original_dates=False) for vm in voicemails]
+	# Bulk fetch deleted forwarder cache for group mailboxes
+	deleted_forwarder_cache = {}
+	if current_mailbox['type'] == 'group':
+		deleted_forwarder_cache = fetch_all_deleted_forwarder_cache(token, host)
+
+	formatted = [format_voicemail(vm, token, host, load_original_dates=False, deleted_forwarder_cache=deleted_forwarder_cache) for vm in voicemails]
 	total_sec = sum(vm.get('audioRecordingDurationSeconds', 0) or 0 for vm in voicemails)
 
-	# For group mailboxes, show all voicemails; for user mailboxes, show preview of 20
 	if current_mailbox['type'] == 'group':
 		display_voicemails = formatted
 		is_preview = False
