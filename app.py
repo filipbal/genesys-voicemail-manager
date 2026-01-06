@@ -726,14 +726,14 @@ def process_voicemails_in_batches(access_token, region_host, voicemails_data, op
 # HELPERS
 # ============================================================================
 
-def format_voicemail(vm, access_token, region_host, load_original_dates=False, user_cache_dict=None):
+def format_voicemail(vm, access_token, region_host, load_original_dates=False):
 	"""Format voicemail with full date and forwarding info"""
 	created = vm.get('createdDate', '')
 	modified = vm.get('modifiedDate', '')
-
+	
 	caller_name = vm.get('callerName', '')
 	caller_address = vm.get('callerAddress', '')
-
+	
 	# Parse embedded original timestamp (legacy support)
 	embedded_date = None
 	source_field = caller_name if caller_name else caller_address
@@ -747,33 +747,31 @@ def format_voicemail(vm, access_token, region_host, load_original_dates=False, u
 			pass
 
 	original_caller = caller_name if caller_name else source_field if source_field else 'Unknown'
-
+	
 	copied_from = vm.get('copiedFrom')
-	is_forwarded = copied_from is not None
+	is_group_vm = vm.get('group') is not None
+	is_forwarded = False
 	forwarded_by = None
 	original_date = None
-
+	
 	conversation_id = vm.get('conversation', {}).get('id')
-
-	if is_forwarded:
-		# Look up forwarded_by from UserNameCache datatable
-		user_id = copied_from.get('user', {}).get('id')
-		if user_id:
-			# Use bulk cache if provided, otherwise fall back to individual lookup
-			if user_cache_dict is not None:
-				cached_name = user_cache_dict.get(user_id)
-			else:
-				cached_name = lookup_user_name_from_cache(access_token, region_host, user_id)
-			forwarded_by = cached_name if cached_name else 'Unknown'
-		else:
-			forwarded_by = 'Unknown'
-
-		# Fallback chain: embedded -> copiedFrom.date -> datatable
+	
+	if copied_from:
+		# Normal case - copiedFrom exists (active user)
+		is_forwarded = True
+		copied_from_user = copied_from.get('user', {})
+		forwarded_by = copied_from_user.get('name') or 'Deleted User'
 		original_date = embedded_date if embedded_date else copied_from.get('date')
+	elif is_group_vm:
+		# Deleted user case - no copiedFrom but VM is in group mailbox (implies forwarded)
+		is_forwarded = True
+		forwarded_by = 'Deleted User'
+		original_date = embedded_date
 
-		if load_original_dates and not original_date and conversation_id and DATATABLE_ID:
-			original_date = get_original_date(access_token, region_host, DATATABLE_ID, conversation_id)
-			time.sleep(API_DELAY_DATATABLE)
+	# Load original date from DT if missing
+	if load_original_dates and not original_date and conversation_id and DATATABLE_ID:
+		original_date = get_original_date(access_token, region_host, DATATABLE_ID, conversation_id)
+		time.sleep(API_DELAY_DATATABLE)
 
 	copied_to = vm.get('copiedTo', [])
 	forwarded_to_name = None
