@@ -203,10 +203,10 @@ def fetch_all_user_names_cache(access_token, region_host):
 
 def get_forwarder_from_cache(access_token, region_host, conversation_id_short):
 	"""Look up forwarder name from cache DT using first 8 chars of conversationId"""
-	if not FORWARDER_CACHE_DT_ID or not conversation_id_short:
+	if not DELETED_FORWARDER_CACHE_ID or not conversation_id_short:
 		return None
 	
-	url = f"https://api.{region_host}/api/v2/flows/datatables/{FORWARDER_CACHE_DT_ID}/rows/{conversation_id_short}?showbrief=false"
+	url = f"https://api.{region_host}/api/v2/flows/datatables/{DELETED_FORWARDER_CACHE_ID}/rows/{conversation_id_short}?showbrief=false"
 	data, error = make_api_request(url, access_token)
 	
 	if error:
