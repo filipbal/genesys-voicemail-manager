@@ -71,6 +71,7 @@ app.config['PERMANENT_SESSION_LIFETIME'] = 3600
 CLIENT_ID = os.environ.get('GENESYS_CLIENT_ID', '')
 DATATABLE_ID = os.environ.get('GENESYS_DATATABLE_ID', '')
 USER_CACHE_DATATABLE_ID = os.environ.get('GENESYS_USER_CACHE_DATATABLE_ID', 'c05fe5aa-f779-4d75-86b6-a2534aeb1d2a')
+DELETED_FORWARDER_CACHE_ID = os.environ.get('GENESYS_DELETED_FORWARDER_CACHE_ID', '')
 
 if not CLIENT_ID:
 	CLIENT_ID = ''
@@ -199,6 +200,19 @@ def fetch_all_user_names_cache(access_token, region_host):
 
 	app.logger.info(f"User name cache loaded: {len(all_users)} users ({page_count} pages)")
 	return all_users
+
+def get_forwarder_from_cache(access_token, region_host, conversation_id_short):
+	"""Look up forwarder name from cache DT using first 8 chars of conversationId"""
+	if not FORWARDER_CACHE_DT_ID or not conversation_id_short:
+		return None
+	
+	url = f"https://api.{region_host}/api/v2/flows/datatables/{FORWARDER_CACHE_DT_ID}/rows/{conversation_id_short}?showbrief=false"
+	data, error = make_api_request(url, access_token)
+	
+	if error:
+		return None
+	
+	return data.get('forwarderName')
 
 # ============================================================================
 # AUTHENTICATION HELPERS
@@ -763,10 +777,16 @@ def format_voicemail(vm, access_token, region_host, load_original_dates=False):
 		forwarded_by = copied_from_user.get('name') or 'Deleted User'
 		original_date = embedded_date if embedded_date else copied_from.get('date')
 	elif is_group_vm:
-		# Deleted user case - no copiedFrom but VM is in group mailbox (implies forwarded)
+		# Deleted user case - no copiedFrom but VM is in group mailbox
 		is_forwarded = True
-		forwarded_by = 'Deleted User'
 		original_date = embedded_date
+		
+		# Try to get forwarder name from cache DT
+		if conversation_id:
+			forwarded_by = get_forwarder_from_cache(access_token, region_host, conversation_id[:8])
+		
+		if not forwarded_by:
+			forwarded_by = 'Deleted User'
 
 	# Load original date from DT if missing
 	if load_original_dates and not original_date and conversation_id and DATATABLE_ID:
