@@ -148,9 +148,16 @@
 			{% endif %}
 			{% endif %}
 		</h5>
-		<button class="btn btn-outline-secondary btn-sm" onclick="location.reload()">
-			<i class="bi bi-arrow-clockwise me-1"></i> Refresh
-		</button>
+		<div class="btn-group btn-group-sm">
+			{% if voicemails %}
+			<button class="btn btn-outline-primary btn-sm" onclick="exportMetadataCsv()">
+				<i class="bi bi-file-earmark-spreadsheet me-1"></i> Export Metadata
+			</button>
+			{% endif %}
+			<button class="btn btn-outline-secondary btn-sm" onclick="location.reload()">
+				<i class="bi bi-arrow-clockwise me-1"></i> Refresh
+			</button>
+		</div>
 	</div>
 	<div class="card-body p-0">
 		{% if voicemails %}
@@ -160,6 +167,7 @@
 					<tr>
 						<th scope="col">#</th>
 						<th scope="col">Conversation ID</th>
+						<th scope="col">Message ID</th>
 						<th scope="col">Original Caller</th>
 						{% if current_mailbox.type == 'group' %}
 						<th scope="col">Forwarded By</th>
@@ -187,6 +195,7 @@
 						data-vm-date="{{ vm.created_date }}">
 						<td class="row-number-cell">{{ loop.index }}</td>
 						<td><code>{{ (vm.conversation_id or vm.id)[:8] }}</code></td>
+						<td><code style="font-size: 0.85em;">{{ vm.id }}</code></td>
 						<td>
 							{{ vm.original_caller }}
 							{% if current_mailbox.type != 'group' and vm.is_forwarded %}
@@ -465,6 +474,48 @@
 
 {% block extra_js %}
 <script>
+// Export Metadata as CSV
+function exportMetadataCsv() {
+	const table = document.querySelector('table.table');
+	if (!table) return;
+
+	const headers = [];
+	table.querySelectorAll('thead th').forEach(th => {
+		const text = th.textContent.trim();
+		if (text !== 'Actions') headers.push(text);
+	});
+
+	const rows = [];
+	table.querySelectorAll('tbody tr').forEach(tr => {
+		if (tr.style.display === 'none') return;
+		const cells = tr.querySelectorAll('td');
+		const row = [];
+		for (let i = 0; i < cells.length; i++) {
+			// Skip the last cell (Actions column)
+			if (i === cells.length - 1) continue;
+			let val = cells[i].textContent.trim().replace(/\s+/g, ' ');
+			// Escape quotes and wrap in quotes if contains comma/quote/newline
+			if (val.includes('"') || val.includes(',') || val.includes('\n')) {
+				val = '"' + val.replace(/"/g, '""') + '"';
+			}
+			row.push(val);
+		}
+		rows.push(row.join(','));
+	});
+
+	const csvContent = headers.join(',') + '\n' + rows.join('\n');
+	const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+	const url = URL.createObjectURL(blob);
+	const a = document.createElement('a');
+	const today = new Date().toISOString().slice(0, 10);
+	a.href = url;
+	a.download = 'voicemail_export_' + today + '.csv';
+	document.body.appendChild(a);
+	a.click();
+	document.body.removeChild(a);
+	URL.revokeObjectURL(url);
+}
+
 // Download button loading state
 document.querySelectorAll('.download-btn').forEach(btn => {
 	btn.addEventListener('click', function() {
