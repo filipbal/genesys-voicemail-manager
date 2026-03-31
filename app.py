@@ -1,16 +1,4 @@
 #!/usr/bin/env python3
-"""
-Genesys Cloud Voicemail Manager - v20
-==========================================
-CHANGES FROM v19:
-- Refactored forward to 3-phase approach:
-  Phase 1: Prepare dictionary (conversation_id -> createdDate)
-  Phase 2: Populate datatable row by row (0.25s delay)
-  Phase 3: Forward messages (0.5s delay)
-- Removed bulk import job approach
-- Removed embedded timestamp in callerAddress
-- Any datatable error aborts entire operation
-"""
 
 import os
 import json
